@@ -1,0 +1,5 @@
+node_modules/
+gpui-kit.d.ts
+herdr.d.ts
+jsconfig.json
+.beads.gate.lock

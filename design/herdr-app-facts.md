@@ -127,3 +127,8 @@ text is JSON on stdout (unlike `bd show`, which also prints `Issue <id> not foun
   `{"error": "resolving nope-123: no issue found matching \"nope-123\"", "schema_version": 1}`
 
 `show` says "no issue**s** found matching", these say "no issue found matching". The runner matches both as BeadGone.
+
+**`VirtualListScrollHandle` drives only `v_virtual_list` from `gpui-base`.** On a `uniform_list` from `gpui-kit`,
+`track_scroll` accepted the handle and `scroll_to_item` did nothing (the selected row went off screen while the list
+stayed put). The bead list is a `v_virtual_list` with a fixed row height (`ROW_H`). On it `scroll_to_item` moves the
+list by the least that shows the row.

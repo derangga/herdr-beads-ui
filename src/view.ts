@@ -1,8 +1,8 @@
 // GPUI drawing. It holds no state and calls no Host method: everything it shows is in the model, the rows and the theme,
 // and every press is a Msg handed to dispatch.
-import { div, svg, uniform_list } from "gpui-kit";
+import { div, svg } from "gpui-kit";
 import type { Element, FocusHandle } from "gpui-kit";
-import { h_flex, Input, Popover, Scrollbar, TextView, v_flex } from "gpui-base";
+import { h_flex, Input, Popover, Scrollbar, TextView, v_flex, v_virtual_list } from "gpui-base";
 import type { InputState, VirtualListScrollHandle } from "gpui-base";
 import { age, ALL, depTree, fullDate, hiddenByFilters, idChars, isWide, keyFor, listWidth, NO_AGE_BELOW, NOT_CLOSED, pickOptions, ROW_H, shownBead, shownId, SORT_KEYS, statusOptions, taskLists, textSections, treeRows, typeOptions } from "./rows.ts";
 import { bdText, emptyState, retryLabel } from "./states.ts";
@@ -11,9 +11,8 @@ import type { BdError, Bead, BeadDetail, Direction, Menu, Model, Msg, Snapshot, 
 export type Theme = Record<string, `#${string}`>;
 type Dispatch = (msg: Msg) => void;
 // What the view owns and the model must not hold: the focus target keys reach, the search box, the close reason's box, the list's
-// scroll position, the id font, the Viewed repo, the agent Send to agent would type into, and `seen`, which hears the rows the list just drew so the
-// owner can tell whether a row is on screen.
-export type Ui = { target: Target | null; root: string | null; nav: FocusHandle; search: InputState; reason: InputState; scroll: VirtualListScrollHandle; mono: string; seen: (start: number, end: number) => void };
+// scroll position, the id font, the Viewed repo, and the agent Send to agent would type into.
+export type Ui = { target: Target | null; root: string | null; nav: FocusHandle; search: InputState; reason: InputState; scroll: VirtualListScrollHandle; mono: string };
 
 const icon = (name: string): string => `mods/beads/icons/${name}.svg`;
 
@@ -339,14 +338,12 @@ function listColumn(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui
                 : "No beads match",
             )
         : // Only the rows on screen are built, so a thousand beads cost what twenty do.
-          uniform_list(
+          v_virtual_list(
             "beads-list",
             rows.length,
+            ROW_H,
             (i) => rows[i]?.id ?? `row:${i}`,
-            (range) => {
-              ui.seen(range.start, range.end);
-              return rows.slice(range.start, range.end).map((b) => row(b, m, t, narrow, now, idW, ui.mono));
-            },
+            (range) => rows.slice(range.start, range.end).map((b) => row(b, m, t, narrow, now, idW, ui.mono)),
           )
             .absolute()
             .inset_0()

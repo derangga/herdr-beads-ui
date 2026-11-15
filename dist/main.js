@@ -853,8 +853,8 @@ function watchToggle(cx, host, state) {
 }
 
 // src/view.ts
-import { div, svg as svg2, uniform_list } from "gpui-kit";
-import { h_flex as h_flex2, Input, Popover, Scrollbar, TextView, v_flex } from "gpui-base";
+import { div, svg as svg2 } from "gpui-kit";
+import { h_flex as h_flex2, Input, Popover, Scrollbar, TextView, v_flex, v_virtual_list } from "gpui-base";
 var icon = (name2) => `mods/beads/icons/${name2}.svg`;
 var pick2 = (t, ...keys) => {
   const found = keys.find((k) => t[k] !== void 0);
@@ -973,14 +973,12 @@ function listColumn(m, rows, t, dispatch, ui, narrow, now) {
       m.snapshot === null ? m.slow ? h_flex2().gap(8).items_center().child(svg2(icon("refresh")).size(14).flex_none().spin(900)).child("Loading beads") : "" : "No beads match"
     ) : (
       // Only the rows on screen are built, so a thousand beads cost what twenty do.
-      uniform_list(
+      v_virtual_list(
         "beads-list",
         rows.length,
+        ROW_H,
         (i) => rows[i]?.id ?? `row:${i}`,
-        (range) => {
-          ui.seen(range.start, range.end);
-          return rows.slice(range.start, range.end).map((b) => row(b, m, t, narrow, now, idW, ui.mono));
-        }
+        (range) => rows.slice(range.start, range.end).map((b) => row(b, m, t, narrow, now, idW, ui.mono))
       ).absolute().inset_0().track_scroll(ui.scroll).on_item_click((id) => dispatch({ _tag: "Click", id }))
     )
   ).child(Scrollbar.vertical("beads-list").absolute().inset_0());
@@ -1212,8 +1210,8 @@ var BeadsView = class extends View {
   search;
   reason;
   scroll;
-  // The rows the list drew last, [start, end): what is on screen, which the model does not know.
-  seen = null;
+  // The row of the selected bead the list was last told to show; -1 when it has to be told again.
+  shownAt = -1;
   mono = "";
   // Set only on the tab-bar button's copy (props role "toggle"): the Viewer it last saw in the focused tab.
   toggle;
@@ -1327,12 +1325,13 @@ var BeadsView = class extends View {
       this.nav.focus();
     }
     if (before.pane === "detail" && model.pane === "list") {
-      this.seen = null;
+      this.shownAt = -1;
     }
     const at = visible(model).findIndex((b) => b.id === model.selected);
-    if (at >= 0 && (this.seen === null || at < this.seen[0] || at >= this.seen[1])) {
+    if (at >= 0 && at !== this.shownAt) {
       this.scroll.scroll_to_item(at);
     }
+    this.shownAt = at;
   }
   render(_cx) {
     const t = this.host.theme();
@@ -1344,7 +1343,7 @@ var BeadsView = class extends View {
       return keysDialog(t, this.mono, this.nav, () => id === null ? null : this.host.closeOverlay(id));
     }
     const target = pickTarget(this.store.model.opener, decodePanes(this.host.panes()), decodeAgents(this.host.agents()));
-    const ui = { target, root: this.root, nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start2, end) => this.seen = [start2, end] };
+    const ui = { target, root: this.root, nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono };
     return draw(this.store.model, visible(this.store.model), t, (msg) => this.dispatch(msg), ui, Date.now());
   }
   // Bounded: set the flag and let the replies in flight be dropped.

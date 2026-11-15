@@ -38,6 +38,9 @@ The list takes 42% of the width, at least 360 px. Detail takes the rest.
 The list fills the Viewer. Enter or a click on a row opens that bead's detail, full width. The detail header starts
 with `‹ List`. Esc, or `‹ List`, always goes back to the list, however many ids were followed. The list then selects
 the bead last shown, scrolled into view. When the filters hide that bead, the list keeps its previous selection.
+The list scrolls by the least that shows the selected row whenever that row's position changes: an arrow key, a click,
+or a sort, filter or reload that moves it. A reload that leaves the row where it is does not move a list the user
+scrolled by hand.
 `[` and `]` walk the bead history inside the detail.
 
 ```

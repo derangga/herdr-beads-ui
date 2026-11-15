@@ -31,8 +31,8 @@ export default class BeadsView extends View {
   search!: InputState;
   reason!: InputState;
   scroll!: VirtualListScrollHandle;
-  // The rows the list drew last, [start, end): what is on screen, which the model does not know.
-  seen: [number, number] | null = null;
+  // The row of the selected bead the list was last told to show; -1 when it has to be told again.
+  shownAt = -1;
   mono = "";
   // Set only on the tab-bar button's copy (props role "toggle"): the Viewer it last saw in the focused tab.
   toggle: { pane: string | null } | undefined;
@@ -160,16 +160,17 @@ export default class BeadsView extends View {
     } else if ((before.menu === "pick" || before.menu === "reason") && model.menu === null) {
       this.nav.focus();
     }
-    // The list was not drawn while the detail filled the Viewer, so what `seen` says is old when it comes back.
+    // The list was not drawn while the detail filled the Viewer, so it has to be told again when it comes back.
     if (before.pane === "detail" && model.pane === "list") {
-      this.seen = null;
+      this.shownAt = -1;
     }
     // After every change, since a sort, a filter or a reload moves the selected row without changing which bead is selected.
-    // Only a row off screen scrolls: the default pins it to the nearest edge, so scrolling a visible one would jump it.
+    // Only a move scrolls, so a reload that leaves the row in place does not pull back a list the user scrolled by hand.
     const at = visible(model).findIndex((b) => b.id === model.selected);
-    if (at >= 0 && (this.seen === null || at < this.seen[0] || at >= this.seen[1])) {
+    if (at >= 0 && at !== this.shownAt) {
       this.scroll.scroll_to_item(at);
     }
+    this.shownAt = at;
   }
 
   render(_cx: Context): Element {
@@ -183,7 +184,7 @@ export default class BeadsView extends View {
     }
     // Looked up on every draw, since the agents come and go without the Viewer being told.
     const target = pickTarget(this.store.model.opener, decodePanes(this.host.panes()), decodeAgents(this.host.agents()));
-    const ui = { target, root: this.root, nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start: number, end: number) => (this.seen = [start, end]) };
+    const ui = { target, root: this.root, nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono };
     return draw(this.store.model, visible(this.store.model), t, (msg) => this.dispatch(msg), ui, Date.now());
   }
 

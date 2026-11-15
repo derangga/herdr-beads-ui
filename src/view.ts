@@ -2,7 +2,7 @@
 // and every press is a Msg handed to dispatch.
 import { div, svg, uniform_list } from "gpui-kit";
 import type { Element, FocusHandle } from "gpui-kit";
-import { h_flex, Input, Popup, Scrollbar, TextView, v_flex } from "gpui-base";
+import { h_flex, Input, Popover, Scrollbar, TextView, v_flex } from "gpui-base";
 import type { InputState, VirtualListScrollHandle } from "gpui-base";
 import { age, ALL, depTree, fullDate, hiddenByFilters, idChars, isWide, keyFor, listWidth, NO_AGE_BELOW, NOT_CLOSED, pickOptions, ROW_H, shownBead, shownId, SORT_KEYS, statusOptions, taskLists, textSections, treeRows, typeOptions } from "./rows.ts";
 import { bdText, emptyState, retryLabel } from "./states.ts";
@@ -50,7 +50,8 @@ const statusLabel = (status: string): string => STATUS_LABEL[status] ?? status.t
 
 const TYPE_ICON = new Set(["task", "bug", "feature", "epic", "chore"]);
 
-function button(id: string, label: string, on: boolean, t: Theme, click: () => void, chevron = false): Element {
+// Without a click, the button is a Popover trigger: the Popover owns the press, and a handler here would stop it.
+function button(id: string, label: string, on: boolean, t: Theme, click: (() => void) | null, chevron = false): Element {
   return h_flex()
     .id(id)
     .h(26)
@@ -67,10 +68,12 @@ function button(id: string, label: string, on: boolean, t: Theme, click: () => v
     .cursor_pointer()
     .hover((s) => s.bg(t.hover))
     .active((s) => s.bg(t.selected))
-    .on_click((_e, cx) => {
-      cx.stop_propagation();
-      click();
-    })
+    .when(click !== null, (e) =>
+      e.on_click((_e, cx) => {
+        cx.stop_propagation();
+        click?.();
+      }),
+    )
     .child(label)
     .when(chevron, (e) => e.child(svg(icon("chevron-down")).size(12).flex_none()));
 }
@@ -180,31 +183,37 @@ const option = (id: string, label: string, on: boolean, t: Theme, click: () => v
     .child(label);
 
 // A picker: its button, and under it the choices in a layer above the window while its menu is the open one.
-function picker(m: Model, name: Menu, label: string, on: boolean, t: Theme, dispatch: Dispatch): Element {
+function picker(m: Model, name: Menu, label: string, on: boolean, t: Theme, dispatch: Dispatch, ui: Ui): Element {
   const options: { label: string; on: boolean; msg: Msg }[] =
     name === "status"
       ? statusOptions(m).map((s) => ({ label: s, on: m.filters.status === s, msg: { _tag: "SetStatus", status: s } }))
       : name === "type"
         ? typeOptions(m).map((s) => ({ label: s, on: m.filters.type === s, msg: { _tag: "SetType", type: s } }))
         : SORT_KEYS.map((k) => ({ label: SORT_LABEL(k), on: m.sort.key === k, msg: { _tag: "SortBy", key: k } }));
-  // shortcut: no outside-press dismissal, because a press on this button would close then reopen the menu; Esc, a choice or a row click closes it.
-  return Popup.new(
-    `menu-${name}`,
-    button(name, label, on || m.menu === name, t, () => dispatch({ _tag: "ToggleMenu", menu: name }), true),
-  )
+  // A Popover owns the press on its trigger and the press outside, so a click elsewhere closes the menu without reopening it.
+  // track_focus keeps the keyboard on the Viewer's handle instead of moving it into the panel.
+  return Popover.new(`menu-${name}`)
+    .open(m.menu === name)
     .anchor("bottom_left")
+    .track_focus(ui.nav)
     .flex_none()
-    .when(m.menu === name, (e) => e.content(panel(t).children(options.map((o) => option(`option-${name}-${o.label}`, o.label, o.on, t, () => dispatch(o.msg))))));
+    .on_open_change((open) => {
+      if (open !== (m.menu === name)) {
+        dispatch({ _tag: "ToggleMenu", menu: name });
+      }
+    })
+    .trigger(button(name, label, on || m.menu === name, t, null, true))
+    .content(panel(t).children(options.map((o) => option(`option-${name}-${o.label}`, o.label, o.on, t, () => dispatch(o.msg)))));
 }
 
-function filters(m: Model, t: Theme, dispatch: Dispatch, narrow: boolean): Element[] {
+function filters(m: Model, t: Theme, dispatch: Dispatch, ui: Ui, narrow: boolean): Element[] {
   const f = m.filters;
   return [
     button("ready", "Ready", f.ready, t, () => dispatch({ _tag: "ToggleReady" })),
-    picker(m, "status", f.status === NOT_CLOSED ? "Status" : `Status: ${f.status}`, f.status !== NOT_CLOSED, t, dispatch),
-    picker(m, "type", f.type === ALL ? "Type" : `Type: ${f.type}`, f.type !== ALL, t, dispatch),
+    picker(m, "status", f.status === NOT_CLOSED ? "Status" : `Status: ${f.status}`, f.status !== NOT_CLOSED, t, dispatch, ui),
+    picker(m, "type", f.type === ALL ? "Type" : `Type: ${f.type}`, f.type !== ALL, t, dispatch, ui),
     div().flex_1(),
-    picker(m, "sort", narrow ? "Sort" : `Sort: ${SORT_LABEL(m.sort.key)}`, false, t, dispatch),
+    picker(m, "sort", narrow ? "Sort" : `Sort: ${SORT_LABEL(m.sort.key)}`, false, t, dispatch, ui),
     iconButton("reverse", m.sort.reverse ? "arrow-up" : "arrow-down", "Reverse the sort", t, () => dispatch({ _tag: "Reverse" })),
   ];
 }
@@ -232,7 +241,7 @@ function topBar(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui, sh
       h_flex()
         .gap(6)
         .items_center()
-        .children(filters(m, t, dispatch, short)),
+        .children(filters(m, t, dispatch, ui, short)),
     );
 }
 
@@ -474,17 +483,22 @@ function statusPill(b: BeadDetail, m: Model, t: Theme, dispatch: Dispatch, ui: U
         .tooltip("Change status (s)")
         .cursor_pointer()
         .hover((s) => s.bg(t.hover))
-        .active((s) => s.bg(t.selected))
-        .on_click((_e, cx) => {
-          cx.stop_propagation();
-          dispatch({ _tag: "ToggleMenu", menu: "pick" });
-        }),
+        .active((s) => s.bg(t.selected)),
     );
-  // shortcut: no outside-press dismissal, as with the filter menus. The 120 ms open fade is skipped: freshly mounted Popup content has no
-  // earlier opacity for .transition to animate from. Revisit if gpui-kit gains an enter animation.
-  return Popup.new("menu-pick", pill)
+  // A Popover, as with the filter menus: it owns the press on the pill and the press outside. ToggleMenu closes both steps, "pick" and
+  // "reason". The 120 ms open fade is skipped: freshly mounted content has no earlier opacity for .transition to animate from.
+  const shown = !busy && (m.menu === "pick" || m.menu === "reason");
+  return Popover.new("menu-pick")
+    .open(shown)
     .anchor("bottom_left")
+    .track_focus(ui.nav)
     .flex_none()
+    .on_open_change((open) => {
+      if (open !== shown) {
+        dispatch({ _tag: "ToggleMenu", menu: "pick" });
+      }
+    })
+    .trigger(pill)
     .when(!busy && m.menu === "pick", (e) => e.content(panel(t).children(pickOptions(m, b.status).map((s) => option(`option-pick-${s}`, s, s === b.status, t, () => dispatch({ _tag: "Pick", status: s }))))))
     .when(!busy && m.menu === "reason", (e) =>
       e.content(

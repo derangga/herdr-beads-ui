@@ -836,7 +836,7 @@ function watchToggle(cx, host, state) {
 
 // src/view.ts
 import { div, svg as svg2, uniform_list } from "gpui-kit";
-import { h_flex as h_flex2, Input, Popup, Scrollbar, TextView, v_flex } from "gpui-base";
+import { h_flex as h_flex2, Input, Popover, Scrollbar, TextView, v_flex } from "gpui-base";
 var icon = (name2) => `mods/beads/icons/${name2}.svg`;
 var pick2 = (t, ...keys) => {
   const found = keys.find((k) => t[k] !== void 0);
@@ -862,10 +862,13 @@ var STATUS_LABEL = { open: "OPEN", in_progress: "IN PROG", blocked: "BLOCKED", d
 var statusLabel = (status2) => STATUS_LABEL[status2] ?? status2.toUpperCase().slice(0, 8);
 var TYPE_ICON = /* @__PURE__ */ new Set(["task", "bug", "feature", "epic", "chore"]);
 function button(id, label, on, t, click, chevron = false) {
-  return h_flex2().id(id).h(26).px(8).gap(4).flex_none().items_center().rounded(6).border_1().border_color(on ? t.accent : t.border).text_size(12).text_color(on ? t.foreground : t.muted).when(on, (e) => e.bg(t.selected)).cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
-    cx.stop_propagation();
-    click();
-  }).child(label).when(chevron, (e) => e.child(svg2(icon("chevron-down")).size(12).flex_none()));
+  return h_flex2().id(id).h(26).px(8).gap(4).flex_none().items_center().rounded(6).border_1().border_color(on ? t.accent : t.border).text_size(12).text_color(on ? t.foreground : t.muted).when(on, (e) => e.bg(t.selected)).cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).when(
+    click !== null,
+    (e) => e.on_click((_e, cx) => {
+      cx.stop_propagation();
+      click?.();
+    })
+  ).child(label).when(chevron, (e) => e.child(svg2(icon("chevron-down")).size(12).flex_none()));
 }
 function iconButton(id, name2, tip, t, click, spin = false) {
   return div().id(id).w(26).h(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(t.muted).tooltip(tip).accessibility_label(tip).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
@@ -894,21 +897,22 @@ var option = (id, label, on, t, click) => h_flex2().id(id).h(26).px(10).gap(8).i
   cx.stop_propagation();
   click();
 }).child(label);
-function picker(m, name2, label, on, t, dispatch) {
+function picker(m, name2, label, on, t, dispatch, ui) {
   const options = name2 === "status" ? statusOptions(m).map((s) => ({ label: s, on: m.filters.status === s, msg: { _tag: "SetStatus", status: s } })) : name2 === "type" ? typeOptions(m).map((s) => ({ label: s, on: m.filters.type === s, msg: { _tag: "SetType", type: s } })) : SORT_KEYS.map((k) => ({ label: SORT_LABEL(k), on: m.sort.key === k, msg: { _tag: "SortBy", key: k } }));
-  return Popup.new(
-    `menu-${name2}`,
-    button(name2, label, on || m.menu === name2, t, () => dispatch({ _tag: "ToggleMenu", menu: name2 }), true)
-  ).anchor("bottom_left").flex_none().when(m.menu === name2, (e) => e.content(panel(t).children(options.map((o) => option(`option-${name2}-${o.label}`, o.label, o.on, t, () => dispatch(o.msg))))));
+  return Popover.new(`menu-${name2}`).open(m.menu === name2).anchor("bottom_left").track_focus(ui.nav).flex_none().on_open_change((open) => {
+    if (open !== (m.menu === name2)) {
+      dispatch({ _tag: "ToggleMenu", menu: name2 });
+    }
+  }).trigger(button(name2, label, on || m.menu === name2, t, null, true)).content(panel(t).children(options.map((o) => option(`option-${name2}-${o.label}`, o.label, o.on, t, () => dispatch(o.msg)))));
 }
-function filters(m, t, dispatch, narrow) {
+function filters(m, t, dispatch, ui, narrow) {
   const f = m.filters;
   return [
     button("ready", "Ready", f.ready, t, () => dispatch({ _tag: "ToggleReady" })),
-    picker(m, "status", f.status === NOT_CLOSED ? "Status" : `Status: ${f.status}`, f.status !== NOT_CLOSED, t, dispatch),
-    picker(m, "type", f.type === ALL ? "Type" : `Type: ${f.type}`, f.type !== ALL, t, dispatch),
+    picker(m, "status", f.status === NOT_CLOSED ? "Status" : `Status: ${f.status}`, f.status !== NOT_CLOSED, t, dispatch, ui),
+    picker(m, "type", f.type === ALL ? "Type" : `Type: ${f.type}`, f.type !== ALL, t, dispatch, ui),
     div().flex_1(),
-    picker(m, "sort", narrow ? "Sort" : `Sort: ${SORT_LABEL(m.sort.key)}`, false, t, dispatch),
+    picker(m, "sort", narrow ? "Sort" : `Sort: ${SORT_LABEL(m.sort.key)}`, false, t, dispatch, ui),
     iconButton("reverse", m.sort.reverse ? "arrow-up" : "arrow-down", "Reverse the sort", t, () => dispatch({ _tag: "Reverse" }))
   ];
 }
@@ -917,7 +921,7 @@ function topBar(m, rows, t, dispatch, ui, short) {
   return v_flex().flex_none().px(8).pt(8).pb(6).gap(6).border_b(1).border_color(t.border).child(
     h_flex2().gap(6).items_center().child(searchBox(m, rows, t, dispatch, ui)).child(refresh)
   ).child(
-    h_flex2().gap(6).items_center().children(filters(m, t, dispatch, short))
+    h_flex2().gap(6).items_center().children(filters(m, t, dispatch, ui, short))
   );
 }
 function row(b, m, t, narrow, now, idW, mono) {
@@ -1014,12 +1018,14 @@ function statusPill(b, m, t, dispatch, ui) {
   const busy = m.writing.has(b.id);
   const pill = h_flex2().id("status-pill").gap(3).px(6).items_center().rounded(4).border_1().border_color(color).text_size(10).font_semibold().text_color(color).opacity(busy ? 0.6 : 1).when(busy, (e) => e.child(svg2(icon("refresh")).size(10).flex_none().spin(900))).child(statusLabel(b.status)).when(
     !busy,
-    (e) => e.child(svg2(icon("chevron-down")).size(10).flex_none()).tooltip("Change status (s)").cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
-      cx.stop_propagation();
-      dispatch({ _tag: "ToggleMenu", menu: "pick" });
-    })
+    (e) => e.child(svg2(icon("chevron-down")).size(10).flex_none()).tooltip("Change status (s)").cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected))
   );
-  return Popup.new("menu-pick", pill).anchor("bottom_left").flex_none().when(!busy && m.menu === "pick", (e) => e.content(panel(t).children(pickOptions(m, b.status).map((s) => option(`option-pick-${s}`, s, s === b.status, t, () => dispatch({ _tag: "Pick", status: s })))))).when(
+  const shown = !busy && (m.menu === "pick" || m.menu === "reason");
+  return Popover.new("menu-pick").open(shown).anchor("bottom_left").track_focus(ui.nav).flex_none().on_open_change((open) => {
+    if (open !== shown) {
+      dispatch({ _tag: "ToggleMenu", menu: "pick" });
+    }
+  }).trigger(pill).when(!busy && m.menu === "pick", (e) => e.content(panel(t).children(pickOptions(m, b.status).map((s) => option(`option-pick-${s}`, s, s === b.status, t, () => dispatch({ _tag: "Pick", status: s })))))).when(
     !busy && m.menu === "reason",
     (e) => e.content(
       panel(t).w(240).p(8).gap(6).child(div().text_size(11).text_color(t.muted).child("Reason for closing (optional)")).child(

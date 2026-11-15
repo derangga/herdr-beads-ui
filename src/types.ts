@@ -76,6 +76,15 @@ export type Pane = "list" | "detail";
 
 export type Menu = "status" | "type" | "sort";
 
+// One bd call of the detail. `gen` names the request: a reply or timer from an earlier request of the same part carries
+// another number and is dropped. A reload keeps the old value in `prev` so the shown detail does not blank while it runs.
+export type Part<T> = { _tag: "Loading"; prev: T | null; gen: number } | { _tag: "Ready"; value: T } | { _tag: "Failed"; error: BdError };
+
+export type PartName = "show" | "down" | "up" | "comments";
+
+// The four calls made for one shown bead. `slow` turns on 150 ms after they started, which is when "Loading" may appear.
+export type Detail = { show: Part<BeadDetail>; down: Part<TreeNode[]>; up: Part<TreeNode[]>; comments: Part<Comment[]>; slow: boolean };
+
 export type Model = {
   // The last good load: a failed load leaves it alone.
   snapshot: Snapshot | null;
@@ -84,6 +93,10 @@ export type Model = {
   filters: Filters;
   sort: Sort;
   selected: string | null;
+  // Detail by bead id: the shown bead's calls, and the beads shown before whose calls all finished. A good load empties it.
+  details: Map<string, Detail>;
+  // The last request number handed out to a detail call.
+  gen: number;
   // The Viewer's own width in px, 0 until measured. Layout is derived from it, so crossing a breakpoint changes no state.
   width: number;
   pane: Pane;
@@ -113,7 +126,16 @@ export type Msg =
   | { _tag: "FocusSearch" }
   | { _tag: "SearchFocused"; on: boolean }
   | { _tag: "ToggleMenu"; menu: Menu }
-  | { _tag: "ToggleHelp" };
+  | { _tag: "ToggleHelp" }
+  | { _tag: "Shown"; id: string; gen: number; res: Res<BeadDetail> }
+  | { _tag: "Tree"; id: string; gen: number; direction: Direction; res: Res<TreeNode[]> }
+  | { _tag: "Discussed"; id: string; gen: number; res: Res<Comment[]> }
+  | { _tag: "Waited"; id: string; gen: number; timer: Timer }
+  // Reruns one failed call of the shown bead.
+  | { _tag: "Retry"; part: PartName };
+
+// "fetch": the bead has stayed shown long enough to ask bd. "loading": long enough for a "Loading" line.
+export type Timer = "fetch" | "loading";
 
 // Plain data the runner executes and answers with a Msg.
-export type Cmd = { _tag: "Load" };
+export type Cmd = { _tag: "Load" } | { _tag: "Fetch"; id: string; part: PartName; gen: number } | { _tag: "Wait"; id: string; gen: number; timer: Timer };

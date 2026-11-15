@@ -1,6 +1,6 @@
 // Beads and models built by hand for the list tests. Only the tests use it.
 import { initModel, update } from "../src/update.ts";
-import type { Bead, Model, Msg, Snapshot } from "../src/types.ts";
+import type { Bead, BeadDetail, Model, Msg, Snapshot } from "../src/types.ts";
 
 export const bead = (id: string, over: Partial<Bead> = {}): Bead => ({
   id,
@@ -19,6 +19,8 @@ export const bead = (id: string, over: Partial<Bead> = {}): Bead => ({
   comment_count: 0,
   ...over,
 });
+
+export const detail = (id: string, over: Partial<BeadDetail> = {}): BeadDetail => ({ ...bead(id), description: "", design: "", acceptance_criteria: "", notes: "", dependencies: [], ...over });
 
 export const snapshot = (beads: Bead[], ready: string[] = [], locks: [string, number][] = []): Snapshot => ({ beads, ready: new Set(ready), locks: new Map(locks) });
 

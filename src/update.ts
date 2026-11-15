@@ -1,17 +1,79 @@
-// The list's reducer: (Model, Msg) -> (Model, Cmd[]). Pure. Single flight: a refresh during a load is dropped.
-import { initFilters, initSort, isWide, reselect, visible } from "./rows.ts";
-import type { Cmd, Model, Msg } from "./types.ts";
+// The reducer: (Model, Msg) -> (Model, Cmd[]). Pure. Single flight: a refresh during a load is dropped.
+import { initFilters, initSort, isWide, reselect, shownId, visible } from "./rows.ts";
+import type { Cmd, Detail, Model, Msg, Part, PartName, Res, Timer } from "./types.ts";
 
-export const initModel = (): Model => ({ snapshot: null, loading: false, error: null, filters: initFilters(), sort: initSort(), selected: null, width: 0, pane: "list", searching: false, menu: null, help: false });
+export const initModel = (): Model => ({ snapshot: null, loading: false, error: null, filters: initFilters(), sort: initSort(), selected: null, details: new Map(), gen: 0, width: 0, pane: "list", searching: false, menu: null, help: false });
 
-// A load fills the list, so the viewer opens by sending Refresh.
+// A load fills the list, so the viewer opens by sending Refresh. After every message the shown bead's detail is started if it is missing.
 export function update(m: Model, msg: Msg): [Model, Cmd[]] {
+  const [next, cmds] = step(m, msg);
+  const [settled, more] = settle(next);
+  return [settled, more.length === 0 ? cmds : [...cmds, ...more]];
+}
+
+const PARTS: PartName[] = ["show", "down", "up", "comments"];
+const toPart = <T>(res: Res<T>): Part<T> => (res.ok ? { _tag: "Ready", value: res.value } : { _tag: "Failed", error: res.error });
+const prevOf = <T>(p: Part<T> | undefined): T | null => (p?._tag === "Ready" ? p.value : p?._tag === "Loading" ? p.prev : null);
+const isLoading = (d: Detail): boolean => PARTS.some((p) => d[p]._tag === "Loading");
+const fetch = (id: string, part: PartName, gen: number): Cmd => ({ _tag: "Fetch", id, part, gen });
+const wait = (id: string, gen: number, timer: Timer): Cmd => ({ _tag: "Wait", id, gen, timer });
+
+// Every call of a bead's detail under one request number. `old` is what the bead showed before a reload. A bead that has just
+// been shown waits before asking bd, so passing over it costs nothing; a reload asks at once.
+function begin(id: string, gen: number, old: Detail | undefined, debounce: boolean): [Detail, Cmd[]] {
+  const loading = <T>(p: Part<T> | undefined): Part<T> => ({ _tag: "Loading", prev: prevOf(p), gen });
+  const detail: Detail = { show: loading(old?.show), down: loading(old?.down), up: loading(old?.up), comments: loading(old?.comments), slow: false };
+  return [detail, [...(debounce ? [wait(id, gen, "fetch")] : PARTS.map((part) => fetch(id, part, gen))), wait(id, gen, "loading")]];
+}
+
+// The entry of the shown bead whose `part` is still waiting for request `gen`. A reply or timer of an earlier request, or for a
+// bead that is no longer shown, finds none and is dropped.
+function waiting(m: Model, id: string, part: PartName, gen: number): Detail | undefined {
+  const d = m.details.get(id);
+  const p = d?.[part];
+  return d !== undefined && id === shownId(m) && p?._tag === "Loading" && p.gen === gen ? d : undefined;
+}
+
+function patch(m: Model, id: string, part: PartName, gen: number, change: Partial<Detail>): Model {
+  const d = waiting(m, id, part, gen);
+  return d === undefined ? m : { ...m, details: new Map(m.details).set(id, { ...d, ...change }) };
+}
+
+// Calls of a bead that is no longer shown are abandoned, so it is fetched afresh when it comes back; finished ones stay cached.
+function settle(m: Model): [Model, Cmd[]] {
+  const id = shownId(m);
+  const keep = [...m.details].filter(([k, d]) => k === id || !isLoading(d));
+  if (keep.length === m.details.size && (id === null || m.details.has(id))) {
+    return [m, []];
+  }
+  const details = new Map(keep);
+  if (id === null || details.has(id)) {
+    return [{ ...m, details }, []];
+  }
+  const gen = m.gen + 1;
+  const [d, cmds] = begin(id, gen, undefined, true);
+  return [{ ...m, gen, details: details.set(id, d) }, cmds];
+}
+
+function step(m: Model, msg: Msg): [Model, Cmd[]] {
   switch (msg._tag) {
     case "Refresh":
       return m.loading ? [m, []] : [{ ...m, loading: true }, [{ _tag: "Load" }]];
-    case "Loaded":
+    case "Loaded": {
       // A failed load keeps the last good list and records the error.
-      return [msg.res.ok ? reselect({ ...m, loading: false, error: null, snapshot: msg.res.value }) : { ...m, loading: false, error: msg.res.error }, []];
+      if (!msg.res.ok) {
+        return [{ ...m, loading: false, error: msg.res.error }, []];
+      }
+      // The beads may have changed, so no cached detail is kept; the shown one reloads under what it showed.
+      const next = reselect({ ...m, loading: false, error: null, snapshot: msg.res.value });
+      const id = shownId(next);
+      if (id === null) {
+        return [{ ...next, details: new Map() }, []];
+      }
+      const gen = m.gen + 1;
+      const [d, cmds] = begin(id, gen, m.details.get(id), false);
+      return [{ ...next, gen, details: new Map([[id, d]]) }, cmds];
+    }
     case "ToggleReady":
       return [reselect({ ...m, filters: { ...m.filters, ready: !m.filters.ready } }), []];
     case "SetStatus":
@@ -54,6 +116,29 @@ export function update(m: Model, msg: Msg): [Model, Cmd[]] {
       return [{ ...m, menu: m.menu === msg.menu ? null : msg.menu }, []];
     case "ToggleHelp":
       return [{ ...m, help: !m.help, menu: null }, []];
+    case "Shown":
+      return [patch(m, msg.id, "show", msg.gen, { show: toPart(msg.res) }), []];
+    case "Tree":
+      return [patch(m, msg.id, msg.direction, msg.gen, msg.direction === "down" ? { down: toPart(msg.res) } : { up: toPart(msg.res) }), []];
+    case "Discussed":
+      return [patch(m, msg.id, "comments", msg.gen, { comments: toPart(msg.res) }), []];
+    case "Waited":
+      // The show call stands for the bead: all four started under one number, and it is the one the Loading line waits on.
+      if (msg.timer === "loading") {
+        return [patch(m, msg.id, "show", msg.gen, { slow: true }), []];
+      }
+      return [m, waiting(m, msg.id, "show", msg.gen) === undefined ? [] : PARTS.map((part) => fetch(msg.id, part, msg.gen))];
+    case "Retry": {
+      const id = shownId(m);
+      const d = id === null ? undefined : m.details.get(id);
+      if (id === null || d === undefined) {
+        return [m, []];
+      }
+      const gen = m.gen + 1;
+      const again: Detail = { ...d, slow: msg.part === "show" ? false : d.slow };
+      again[msg.part] = { _tag: "Loading", prev: null, gen };
+      return [{ ...m, gen, details: new Map(m.details).set(id, again) }, msg.part === "show" ? [fetch(id, "show", gen), wait(id, gen, "loading")] : [fetch(id, msg.part, gen)]];
+    }
   }
 }
 

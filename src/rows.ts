@@ -1,5 +1,5 @@
 // Filtering, search and sorting of the loaded beads. Pure: bd is never run here.
-import type { Bead, Filters, Model, Msg, Sort, SortKey } from "./types.ts";
+import type { Bead, BeadDetail, Filters, Model, Msg, Sort, SortKey } from "./types.ts";
 
 export const NOT_CLOSED = "not closed";
 export const ALL = "all";
@@ -57,6 +57,26 @@ export function reselect(m: Model): Model {
   return rows.some((b) => b.id === m.selected) ? m : { ...m, selected: rows[0]?.id ?? null };
 }
 
+// The bead whose detail is on screen: the selected one beside the list, or once opened when the detail fills the Viewer.
+export const shownId = (m: Pick<Model, "selected" | "width" | "pane">): string | null => (m.selected !== null && (isWide(m) || m.pane === "detail") ? m.selected : null);
+
+// The shown bead is not in the filtered list, which happens when it was reached by a link or the filters changed under it.
+export const hiddenByFilters = (m: Pick<Model, "selected" | "width" | "pane">, rows: Bead[]): boolean => {
+  const id = shownId(m);
+  return id !== null && !rows.some((b) => b.id === id);
+};
+
+// The detail's markdown sections, only those with text.
+export const textSections = (d: BeadDetail): [string, string][] =>
+  (
+    [
+      ["Description", d.description],
+      ["Design", d.design],
+      ["Acceptance criteria", d.acceptance_criteria],
+      ["Notes", d.notes],
+    ] satisfies [string, string][]
+  ).filter(([, text]) => text.trim() !== "");
+
 // --- layout ---
 
 export const WIDE_AT = 800;
@@ -78,6 +98,13 @@ export function statusOptions(m: Model): string[] {
 
 export function typeOptions(m: Model): string[] {
   return [ALL, ...[...new Set((m.snapshot?.beads ?? []).map((b) => b.issue_type))].sort()];
+}
+
+// "2026-11-12 03:49" in the viewer's time zone, for a tooltip; text that does not parse is shown as it came.
+export function fullDate(iso: string): string {
+  const d = new Date(iso);
+  const two = (n: number): string => String(n).padStart(2, "0");
+  return Number.isNaN(d.getTime()) ? iso : `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
 }
 
 // "2d", "4w": the largest whole unit since `iso`. A date that does not parse or lies ahead reads as "now".

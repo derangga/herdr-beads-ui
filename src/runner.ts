@@ -1,11 +1,14 @@
 // Runs bd in the Viewed repo and returns a value: the decoded data or a tagged BdError. Nothing here throws.
 import { decodeBlocked, decodeComments, decodeList, decodeReady, decodeShow, decodeStatuses, decodeTree } from "./decode.ts";
 import type { ExecResult, Host } from "./host.ts";
-import type { BdError, Cmd, Direction, Msg, Res } from "./types.ts";
+import type { BdError, Cmd, Direction, Msg, Res, Timer } from "./types.ts";
 
 const BD_TIMEOUT_MS = 15_000;
 // Another bd process can hold the database for a moment, so a locked or slow call is tried twice more.
 const RETRY_DELAYS_MS = [300, 900];
+// A bead must stay shown this long before bd is asked about it, so holding j runs bd only for the bead it stops on.
+// A detail still empty after the second shows "Loading", so a fast bd never flashes it. Both count from the selection.
+export const WAIT_MS: Record<Timer, number> = { fetch: 120, loading: 150 };
 
 const fail = (error: BdError): Res<never> => ({ ok: false, error });
 
@@ -104,7 +107,7 @@ export const depTree = (host: Host, root: string, id: string, direction: Directi
 export const beadComments = (host: Host, root: string, id: string) => bdJson(host, root, ["comments", id, "--json"], decodeComments);
 export const statuses = (host: Host, root: string) => bdJson(host, root, ["statuses", "--json"], decodeStatuses);
 
-// Runs a Cmd and answers with a Msg. The three reads go at once; the first error in list, ready, blocked order wins.
+// Runs a Cmd and answers with a Msg. The three list reads go at once; the first error in list, ready, blocked order wins.
 export async function run(host: Host, root: string, cmd: Cmd): Promise<Msg> {
   switch (cmd._tag) {
     case "Load": {
@@ -121,5 +124,18 @@ export async function run(host: Host, root: string, cmd: Cmd): Promise<Msg> {
       const locks = new Map(blocked.value.map((b) => [b.id, b.blocked_by_count]));
       return { _tag: "Loaded", res: { ok: true, value: { beads: beads.value, ready: new Set(ready.value), locks } } };
     }
+    case "Fetch":
+      switch (cmd.part) {
+        case "show":
+          return { _tag: "Shown", id: cmd.id, gen: cmd.gen, res: await showBead(host, root, cmd.id) };
+        case "down":
+        case "up":
+          return { _tag: "Tree", id: cmd.id, gen: cmd.gen, direction: cmd.part, res: await depTree(host, root, cmd.id, cmd.part) };
+        case "comments":
+          return { _tag: "Discussed", id: cmd.id, gen: cmd.gen, res: await beadComments(host, root, cmd.id) };
+      }
+    case "Wait":
+      await host.sleep(WAIT_MS[cmd.timer]);
+      return { _tag: "Waited", id: cmd.id, gen: cmd.gen, timer: cmd.timer };
   }
 }

@@ -7,9 +7,8 @@ import { decodeFocus, decodeFont, decodeProps } from "./decode.ts";
 import { realHost } from "./host.ts";
 import type { Host } from "./host.ts";
 import { visible } from "./rows.ts";
-import { run } from "./runner.ts";
-import { initModel, update } from "./update.ts";
-import type { Bead, Cmd, Model, Msg } from "./types.ts";
+import { Store } from "./store.ts";
+import type { Bead, Model, Msg } from "./types.ts";
 import { draw } from "./view.ts";
 
 // The Viewed repo: the props say it when something opened the Viewer for a folder, else the focused terminal's folder is the Opener's.
@@ -29,8 +28,7 @@ function rowsCache(): (m: Model) => Bead[] {
 }
 
 export default class BeadsView extends View {
-  model: Model = initModel();
-  closed = false;
+  store!: Store;
   root: string | null = null;
   host!: Host;
   cx!: AsyncContext;
@@ -46,6 +44,15 @@ export default class BeadsView extends View {
     this.cx = cx;
     this.host = realHost(cx);
     this.root = viewedRepo(this.host);
+    this.store = new Store(
+      this.host,
+      this.root,
+      (job) => cx.spawn(job),
+      (before, model, msg) => {
+        this.sync(before, model, msg);
+        this.cx.notify();
+      },
+    );
     this.mono = decodeFont(this.host.settings());
     this.nav = cx.focus_handle();
     this.scroll = VirtualListScrollHandle.new();
@@ -63,9 +70,9 @@ export default class BeadsView extends View {
 
   // pane.go gives a shown copy the keyboard by sending "focus".
   async listen(): Promise<null> {
-    while (!this.closed) {
+    while (!this.store.closed) {
       try {
-        if ((await this.host.nextCommand()) === "focus" && !this.closed) {
+        if ((await this.host.nextCommand()) === "focus" && !this.store.closed) {
           this.nav.focus();
         }
       } catch {
@@ -76,19 +83,7 @@ export default class BeadsView extends View {
   }
 
   dispatch(msg: Msg): void {
-    if (this.closed) {
-      return;
-    }
-    const before = this.model;
-    const [model, cmds] = update(before, msg);
-    this.model = model;
-    if (model !== before) {
-      this.sync(before, model, msg);
-      this.cx.notify();
-    }
-    for (const cmd of cmds) {
-      this.start(cmd);
-    }
+    this.store.dispatch(msg);
   }
 
   // What the model decided that the view's own state must follow: the box's text and focus, and the list's scroll.
@@ -110,29 +105,18 @@ export default class BeadsView extends View {
     }
   }
 
-  start(cmd: Cmd): void {
-    const root = this.root;
-    if (root === null) {
-      return;
-    }
-    this.cx.spawn(async () => {
-      const reply = await run(this.host, root, cmd);
-      this.dispatch(reply);
-    });
-  }
-
   render(_cx: Context): Element {
     const t = this.host.theme();
     if (this.root === null) {
       return div().size_full().p(14).bg(t.background).text_color(t.muted).child("Open from a terminal");
     }
     const ui = { nav: this.nav, search: this.search, scroll: this.scroll, mono: this.mono, seen: (start: number, end: number) => (this.seen = [start, end]) };
-    return draw(this.model, this.rows(this.model), t, (msg) => this.dispatch(msg), ui, Date.now());
+    return draw(this.store.model, this.rows(this.store.model), t, (msg) => this.dispatch(msg), ui, Date.now());
   }
 
   // Bounded: set the flag and let the replies in flight be dropped.
   close(_cx: AsyncContext): void {
-    this.closed = true;
+    this.store.close();
     this.search.release();
     this.scroll.release();
   }

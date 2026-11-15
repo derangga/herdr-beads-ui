@@ -5,7 +5,7 @@ import { run } from "../src/runner.ts";
 import type { AgentRef, Cmd, Msg, Opener, PaneRef } from "../src/types.ts";
 import { initModel, update } from "../src/update.ts";
 import { exit, fakeHost } from "./fake-host.ts";
-import { bead, detail, modelOf, steps } from "./model.ts";
+import { bead, modelOf, steps } from "./model.ts";
 
 const opener: Opener = { terminal: "t1", tab: "b1" };
 const pane = (p: string, terminal: string | null, over: Partial<PaneRef> = {}): PaneRef => ({ pane: p, terminal, tab: "b1", status: null, name: "zsh", ...over });
@@ -94,7 +94,6 @@ const shown = () => ({
   ...modelOf([bead("a-1", { title: "Fix it" })]),
   selected: "a-1",
   width: 900,
-  details: new Map([["a-1", { show: { _tag: "Ready" as const, value: detail("a-1", { title: "Fix it" }) }, down: { _tag: "Ready" as const, value: [] }, up: { _tag: "Ready" as const, value: [] }, comments: { _tag: "Ready" as const, value: [] }, slow: false }]]),
   opener,
 });
 

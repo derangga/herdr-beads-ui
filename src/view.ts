@@ -4,9 +4,9 @@ import { div, svg, uniform_list } from "gpui-kit";
 import type { Element, FocusHandle } from "gpui-kit";
 import { h_flex, Input, Popup, Scrollbar, TextView, v_flex } from "gpui-base";
 import type { InputState, VirtualListScrollHandle } from "gpui-base";
-import { age, ALL, fullDate, hiddenByFilters, idChars, isWide, keyFor, listWidth, NO_AGE_BELOW, NOT_CLOSED, pickOptions, ROW_H, shownBead, shownId, SORT_KEYS, statusOptions, textSections, treeRows, typeOptions } from "./rows.ts";
+import { age, ALL, depTree, fullDate, hiddenByFilters, idChars, isWide, keyFor, listWidth, NO_AGE_BELOW, NOT_CLOSED, pickOptions, ROW_H, shownBead, shownId, SORT_KEYS, statusOptions, taskLists, textSections, treeRows, typeOptions } from "./rows.ts";
 import { bdText, emptyState, retryLabel } from "./states.ts";
-import type { BdError, Bead, BeadDetail, Detail, Menu, Model, Msg, Part, PartName, Target, TreeNode, TreeRow } from "./types.ts";
+import type { BdError, Bead, BeadDetail, Direction, Menu, Model, Msg, Snapshot, Target, TreeNode, TreeRow } from "./types.ts";
 
 export type Theme = Record<string, `#${string}`>;
 type Dispatch = (msg: Msg) => void;
@@ -385,18 +385,13 @@ const heading = (label: string, t: Theme): Element => div().text_size(11).font_s
 const section = (label: string, t: Theme, ...body: Element[]): Element => v_flex().gap(4).flex_none().child(heading(label, t)).children(body);
 
 // A markdown body. The id carries the bead, so another bead's text is never drawn into this one's view state.
-const markdown = (id: string, text: string): Element => TextView.markdown(id, text).selectable(true).scrollable(false).w_full().min_w(0);
+const markdown = (id: string, text: string): Element => TextView.markdown(id, taskLists(text)).selectable(true).scrollable(false).w_full().min_w(0);
 
 const red = (t: Theme): `#${string}` => pick(t, "red", "ansi1");
 
-// A section that failed: what bd said, and a button that reruns only that call.
-function failed(label: string, error: BdError, part: PartName, t: Theme, dispatch: Dispatch): Element {
-  return section(label, t, div().text_size(12).text_color(red(t)).child(bdText(error)), h_flex().child(button(`retry-${part}`, "Retry", false, t, () => dispatch({ _tag: "Retry", part }))));
-}
-
 const GUIDE = 14;
 
-// One row of a tree: its guide lines, a status dot, the id as a link, the title and the edge type. A row repeated from higher up is dimmed.
+// One row of a tree: its guide lines, a status dot, the id as a link, the title and the edge type.
 function treeRow(r: TreeRow, key: string, t: Theme, dispatch: Dispatch, mono: string): Element {
   const line = (e: Element): Element => e.border_l(1).border_color(t.border);
   const own = r.last
@@ -424,7 +419,6 @@ function treeRow(r: TreeRow, key: string, t: Theme, dispatch: Dispatch, mono: st
     .gap(6)
     .items_center()
     .text_size(12)
-    .opacity(r.repeat ? 0.5 : 1)
     .child(
       h_flex()
         .flex_none()
@@ -450,15 +444,8 @@ function treeRow(r: TreeRow, key: string, t: Theme, dispatch: Dispatch, mono: st
     .child(div().flex_none().text_size(11).text_color(t.muted).child(r.edge));
 }
 
-// A tree section. A reload keeps the old rows on screen; before the first reply there is nothing to draw.
-function tree(label: string, part: "down" | "up", p: Part<TreeNode[]>, empty: string, t: Theme, dispatch: Dispatch, mono: string): Element[] {
-  if (p._tag === "Failed") {
-    return [failed(label, p.error, part, t, dispatch)];
-  }
-  const nodes = p._tag === "Ready" ? p.value : p.prev;
-  if (nodes === null) {
-    return [];
-  }
+// A tree section, built from the load's edges.
+function tree(label: string, part: Direction, nodes: TreeNode[], empty: string, t: Theme, dispatch: Dispatch, mono: string): Element[] {
   const rows = treeRows(nodes);
   return [section(`${label} (${rows.length})`, t, ...(rows.length === 0 ? [div().text_size(12).text_color(t.muted).child(empty)] : rows.map((r, i) => treeRow(r, `${part}-${i}`, t, dispatch, mono))))];
 }
@@ -634,9 +621,8 @@ function metaRow(b: BeadDetail, m: Model, t: Theme, dispatch: Dispatch, ui: Ui, 
 // A failed status write: bd's text, and when bd reopen had worked, which step failed.
 const writeText = (w: { error: BdError; second: string | null }): string => (w.second === null ? bdText(w.error) : `bd reopen worked, but bd update --status ${w.second} failed: ${bdText(w.error)}`);
 
-function beadBody(d: BeadDetail, e: Detail, m: Model, hidden: boolean, t: Theme, dispatch: Dispatch, ui: Ui, now: number): Element[] {
-  const comments = e.comments._tag === "Ready" ? e.comments.value : e.comments._tag === "Loading" ? (e.comments.prev ?? []) : [];
-  const sorted = [...comments].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+function beadBody(d: BeadDetail, s: Snapshot, m: Model, hidden: boolean, t: Theme, dispatch: Dispatch, ui: Ui, now: number): Element[] {
+  const sorted = [...d.comments].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
   return [
     h_flex()
       .gap(8)
@@ -678,9 +664,8 @@ function beadBody(d: BeadDetail, e: Detail, m: Model, hidden: boolean, t: Theme,
       )
       .child(sendButton(m, t, dispatch, ui)),
     ...textSections(d).map(([label, text]) => section(label, t, markdown(`md-${d.id}-${label}`, text))),
-    ...tree("Blocked by", "down", e.down, "Nothing blocks this bead.", t, dispatch, ui.mono),
-    ...tree("Blocks", "up", e.up, "This bead blocks nothing.", t, dispatch, ui.mono),
-    ...(e.comments._tag === "Failed" ? [failed("Comments", e.comments.error, "comments", t, dispatch)] : []),
+    ...tree("Blocked by", "down", depTree(s, d.id, "down"), "Nothing blocks this bead.", t, dispatch, ui.mono),
+    ...tree("Blocks", "up", depTree(s, d.id, "up"), "This bead blocks nothing.", t, dispatch, ui.mono),
     ...(sorted.length === 0
       ? []
       : [
@@ -706,38 +691,23 @@ function beadBody(d: BeadDetail, e: Detail, m: Model, hidden: boolean, t: Theme,
   ];
 }
 
-// What the shown bead's calls have given so far. Nothing at all for the first 150 ms, so a fast bd shows no flash.
+// The shown bead from the load's snapshot, so it draws at once. An id the snapshot lacks is a bead deleted since the load.
 function detailBody(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui, now: number): Element[] {
   const id = shownId(m);
-  const note = (text: string, color: `#${string}` = t.muted): Element => div().flex_none().text_size(12).text_color(color).child(text);
+  const note = (text: string): Element => div().flex_none().text_size(12).text_color(t.muted).child(text);
   if (id === null) {
     return [note("Select a bead")];
   }
-  const entry = m.details.get(id);
-  if (entry === undefined) {
-    return [];
+  const [bead, s] = [shownBead(m), m.snapshot];
+  if (bead === null || s === null) {
+    return [
+      note(`${id} no longer exists`),
+      h_flex()
+        .flex_none()
+        .child(button("refresh-gone", "Refresh", false, t, () => dispatch({ _tag: "Refresh" }))),
+    ];
   }
-  const show: Part<BeadDetail> = entry.show;
-  if (show._tag === "Failed") {
-    return show.error._tag === "BeadGone"
-      ? [
-          note(`${id} no longer exists`),
-          h_flex()
-            .flex_none()
-            .child(button("refresh-gone", "Refresh", false, t, () => dispatch({ _tag: "Refresh" }))),
-        ]
-      : [
-          note(bdText(show.error), red(t)),
-          h_flex()
-            .flex_none()
-            .child(button("retry-show", "Retry", false, t, () => dispatch({ _tag: "Retry", part: "show" }))),
-        ];
-  }
-  const bead = shownBead(m);
-  if (bead === null) {
-    return entry.slow ? [note("Loading")] : [];
-  }
-  return beadBody(bead, entry, m, hiddenByFilters(m, rows), t, dispatch, ui, now);
+  return beadBody(bead, s, m, hiddenByFilters(m, rows), t, dispatch, ui, now);
 }
 
 function detailPane(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui, narrow: boolean, now: number): Element {

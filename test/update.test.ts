@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { run } from "../src/runner.ts";
 import { keyFor, listWidth, reselect, visible } from "../src/rows.ts";
 import { initModel, update } from "../src/update.ts";
-import type { BdError, Bead, Model, Msg } from "../src/types.ts";
+import type { BdError, BeadDetail, Model, Msg } from "../src/types.ts";
 import { exit, fakeHost, fixture, ok } from "./fake-host.ts";
 import { bead, many, modelOf, snapshot, steps } from "./model.ts";
 
@@ -85,8 +85,8 @@ test("a sort change keeps the selection", () => {
   );
 });
 
-test("the Load command runs bd list, ready and blocked at once and builds the snapshot", async () => {
-  const answers: Record<string, string> = { list: fixture("list"), ready: fixture("ready"), blocked: fixture("blocked") };
+test("the Load command runs bd export, ready and blocked at once and builds the snapshot", async () => {
+  const answers: Record<string, string> = { export: fixture("export", "jsonl"), ready: fixture("ready"), blocked: fixture("blocked") };
   const { host: base, calls } = fakeHost(({ args }) => ok(answers[args[0] ?? ""] ?? "[]"));
   // Every reply waits until all three calls have started (or 50 ms pass, so a serial run fails instead of hanging).
   let started = 0;
@@ -106,10 +106,15 @@ test("the Load command runs bd list, ready and blocked at once and builds the sn
   };
   const msg = await run(host, "/work/repo", { _tag: "Load" });
   assert.equal(startedAtFirstReply, 3);
-  assert.deepEqual(calls.map((c) => c.args[0]).sort(), ["blocked", "list", "ready"]);
+  assert.deepEqual(calls.map((c) => c.args[0]).sort(), ["blocked", "export", "ready"]);
   assert.ok(msg._tag === "Loaded" && msg.res.ok);
   const { beads, ready, locks } = msg.res.value;
-  assert.equal(beads.length, 5);
+  assert.equal(
+    beads.length,
+    fixture("export", "jsonl")
+      .split("\n")
+      .filter((l) => l !== "" && JSON.parse(l)._type === "issue").length,
+  );
   assert.deepEqual([...ready], ["raccoon-51n", "raccoon-jbn"]);
   assert.deepEqual(
     [...locks],
@@ -121,12 +126,12 @@ test("the Load command runs bd list, ready and blocked at once and builds the sn
 });
 
 test("the Load command answers with the error when any read fails", async () => {
-  const { host } = fakeHost(({ args }) => (args[0] === "ready" ? exit("something broke") : ok(fixture(args[0] === "list" ? "list" : "blocked"))));
+  const { host } = fakeHost(({ args }) => (args[0] === "ready" ? exit("something broke") : ok(args[0] === "export" ? fixture("export", "jsonl") : fixture("blocked"))));
   const msg = await run(host, "/work/repo", { _tag: "Load" });
   assert.ok(msg._tag === "Loaded" && !msg.res.ok && msg.res.error._tag === "BdRejected");
 });
 
-const loaded = (beads: Bead[]): Model => reselect(modelOf(beads));
+const loaded = (beads: BeadDetail[]): Model => reselect(modelOf(beads));
 const WIDE = { _tag: "Resized", width: 1000 } satisfies Msg;
 const NARROW = { _tag: "Resized", width: 500 } satisfies Msg;
 const ENTER = { _tag: "Enter" } satisfies Msg;

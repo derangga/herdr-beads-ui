@@ -32,18 +32,21 @@ export type Bead = {
   comment_count: number;
 };
 
-export type BeadLink = { id: string; title: string; status: string; priority: number; issue_type: string; dependency_type: string };
-
+// Everything a bead's detail shows. A load reads it for every bead at once, so showing a bead runs no bd.
 export type BeadDetail = Bead & {
   description: string;
   design: string;
   acceptance_criteria: string;
   notes: string;
-  dependencies: BeadLink[];
+  comments: Comment[];
 };
+
+// One edge of bd's dependency graph: `from` depends on `to`. `type` is bd's own, such as "blocks" or "parent-child".
+export type Edge = { from: string; to: string; type: string };
 
 export type Blocked = { id: string; blocked_by_count: number; blocked_by: string[] };
 
+// One node of a dependency tree, in the shape `bd dep tree --json` printed: rows.ts builds them from the load's edges.
 export type TreeNode = {
   id: string;
   title: string;
@@ -57,8 +60,8 @@ export type TreeNode = {
 };
 
 // One row of a dependency tree, depth 0 left out. `guides[i]` says the guide line of ancestor level i + 1 goes on past this row,
-// `last` that this row ends its siblings, `repeat` that the id was already drawn higher up.
-export type TreeRow = { id: string; title: string; status: string; edge: string; depth: number; guides: boolean[]; last: boolean; repeat: boolean };
+// `last` that this row ends its siblings.
+export type TreeRow = { id: string; title: string; status: string; edge: string; depth: number; guides: boolean[]; last: boolean };
 
 export type Comment = { id: string; author: string; text: string; created_at: string };
 
@@ -81,8 +84,9 @@ export type SendError = { _tag: "NoTarget" } | { _tag: "TargetGone" } | { _tag: 
 
 export type Focus = { cwd: string | null; terminal: string | null; tab: string | null; pane: string | null };
 
-// What one load builds: every bead, the ids `bd ready` named, and id -> blocked_by_count from `bd blocked`.
-export type Snapshot = { beads: Bead[]; ready: Set<string>; locks: Map<string, number> };
+// What one load builds: every bead with its detail, every dependency edge, the ids `bd ready` named, and id -> blocked_by_count
+// from `bd blocked`.
+export type Snapshot = { beads: BeadDetail[]; edges: Edge[]; ready: Set<string>; locks: Map<string, number> };
 
 export type SortKey = "priority" | "created" | "updated" | "closed" | "status" | "id" | "title" | "type" | "assignee";
 
@@ -96,15 +100,6 @@ export type Pane = "list" | "detail";
 
 // "pick" is the status picker of the shown bead, "reason" its second step: the optional reason for closing.
 export type Menu = "status" | "type" | "sort" | "pick" | "reason";
-
-// One bd call of the detail. `gen` names the request: a reply or timer from an earlier request of the same part carries
-// another number and is dropped. A reload keeps the old value in `prev` so the shown detail does not blank while it runs.
-export type Part<T> = { _tag: "Loading"; prev: T | null; gen: number } | { _tag: "Ready"; value: T } | { _tag: "Failed"; error: BdError };
-
-export type PartName = "show" | "down" | "up" | "comments";
-
-// The four calls made for one shown bead. `slow` turns on 150 ms after they started, which is when "Loading" may appear.
-export type Detail = { show: Part<BeadDetail>; down: Part<TreeNode[]>; up: Part<TreeNode[]>; comments: Part<Comment[]>; slow: boolean };
 
 export type Model = {
   // The last good load: a failed load leaves it alone.
@@ -123,10 +118,6 @@ export type Model = {
   // The beads shown before this one, and the ones left by going back. The shown bead itself is not in either.
   back: string[];
   forward: string[];
-  // Detail by bead id: the shown bead's calls, and the beads shown before whose calls all finished. A good load empties it.
-  details: Map<string, Detail>;
-  // The last request number handed out to a detail call.
-  gen: number;
   // The Viewer's own width in px, 0 until measured. Layout is derived from it, so crossing a breakpoint changes no state.
   width: number;
   pane: Pane;
@@ -179,12 +170,6 @@ export type Msg =
   | { _tag: "SearchFocused"; on: boolean }
   | { _tag: "ToggleMenu"; menu: Menu }
   | { _tag: "ShowKeys" }
-  | { _tag: "Shown"; id: string; gen: number; res: Res<BeadDetail> }
-  | { _tag: "Tree"; id: string; gen: number; direction: Direction; res: Res<TreeNode[]> }
-  | { _tag: "Discussed"; id: string; gen: number; res: Res<Comment[]> }
-  | { _tag: "Waited"; id: string; gen: number; timer: Timer }
-  // Reruns one failed call of the shown bead.
-  | { _tag: "Retry"; part: PartName }
   | { _tag: "ReadStatuses" }
   | { _tag: "StatusesRead"; res: Res<StatusInfo[]> }
   // A status chosen in the picker for the shown bead; "closed" asks for a reason first.
@@ -201,15 +186,10 @@ export type Msg =
   | { _tag: "SendFailed"; error: SendError }
   | { _tag: "Faded"; what: "copied" | "sent"; n: number };
 
-// "fetch": the bead has stayed shown long enough to ask bd. "loading": long enough for a "Loading" line.
-export type Timer = "fetch" | "loading";
-
 // Plain data the runner executes and answers with a Msg.
 export type Cmd =
   | { _tag: "Load" }
   | { _tag: "WaitLoad"; n: number }
-  | { _tag: "Fetch"; id: string; part: PartName; gen: number }
-  | { _tag: "Wait"; id: string; gen: number; timer: Timer }
   | { _tag: "Statuses" }
   // Moves a bead from one status to another: the runner picks the bd commands.
   | { _tag: "Write"; id: string; from: string; to: string; reason: string }

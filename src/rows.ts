@@ -1,5 +1,5 @@
 // Filtering, search and sorting of the loaded beads. Pure: bd is never run here.
-import type { AgentRef, Bead, BeadDetail, Filters, Focus, Model, Msg, Opener, PaneRef, SendError, Sort, SortKey, Target, TreeNode, TreeRow } from "./types.ts";
+import type { AgentRef, Bead, BeadDetail, Direction, Filters, Focus, Model, Msg, Opener, PaneRef, SendError, Snapshot, Sort, SortKey, Target, TreeNode, TreeRow } from "./types.ts";
 
 export const NOT_CLOSED = "not closed";
 export const ALL = "all";
@@ -67,8 +67,8 @@ export const hiddenByFilters = (m: Pick<Model, "selected" | "shown" | "width" | 
   return id !== null && !rows.some((b) => b.id === id);
 };
 
-// A dependency tree as rows, depth 0 (the bead itself) left out. Nesting comes from parent_id, siblings keep bd's order, so the order
-// bd lists the nodes in does not matter. An id already drawn higher up, the bead itself included, is a repeat and is not walked again.
+// A dependency tree as rows, depth 0 (the bead itself) left out. Nesting comes from parent_id and siblings keep the nodes' order, so
+// only the order within one parent matters. depTree emits each id once, so no row repeats.
 // A row's guides say which ancestor levels have a later sibling, `last` that the row ends its siblings.
 export function treeRows(nodes: TreeNode[]): TreeRow[] {
   const kids = new Map<string, TreeNode[]>();
@@ -77,21 +77,16 @@ export function treeRows(nodes: TreeNode[]): TreeRow[] {
       kids.set(n.parent_id, [...(kids.get(n.parent_id) ?? []), n]);
     }
   }
-  const roots = nodes.filter((n) => n.depth === 0);
-  const seen = new Set(roots.map((n) => n.id));
   const rows: TreeRow[] = [];
   const walk = (parent: string, guides: boolean[]): void => {
     const list = kids.get(parent) ?? [];
     list.forEach((n, i) => {
-      const [last, repeat] = [i === list.length - 1, seen.has(n.id)];
-      seen.add(n.id);
-      rows.push({ id: n.id, title: n.title, status: n.status, edge: n.edge_from_parent ?? "", depth: guides.length + 1, guides, last, repeat });
-      if (!repeat) {
-        walk(n.id, [...guides, !last]);
-      }
+      const last = i === list.length - 1;
+      rows.push({ id: n.id, title: n.title, status: n.status, edge: n.edge_from_parent ?? "", depth: guides.length + 1, guides, last });
+      walk(n.id, [...guides, !last]);
     });
   };
-  roots.forEach((r) => walk(r.id, []));
+  nodes.filter((n) => n.depth === 0).forEach((r) => walk(r.id, []));
   return rows;
 }
 
@@ -125,15 +120,51 @@ export function statusOptions(m: Model): string[] {
   return [NOT_CLOSED, ALL, ...BUILT_IN_STATUSES, ...[...custom].sort()];
 }
 
-// The shown bead as its detail has it; null until the first reply. The status is the list's, which a load updates before the detail
-// refetches, so a changed status does not show the old one again while the detail reloads.
+// The shown bead: the load's own copy, so showing one runs no bd. Null when the id is not in it.
 export function shownBead(m: Model): BeadDetail | null {
   const id = shownId(m);
-  const p = id === null ? undefined : m.details.get(id)?.show;
-  const d = p?._tag === "Ready" ? p.value : p?._tag === "Loading" ? p.prev : null;
-  const status = m.snapshot?.beads.find((b) => b.id === id)?.status;
-  return d === null || status === undefined ? d : { ...d, status };
+  return id === null ? null : (m.snapshot?.beads.find((b) => b.id === id) ?? null);
 }
+
+const MAX_DEPTH = 50;
+
+// A bead's dependency tree from the load's edges, in the nodes `bd dep tree --json` printed, so treeRows reads it unchanged. "down"
+// follows what the bead depends on, "up" what depends on it, every edge type but relates-to, siblings in edge order. Like bd, every id comes
+// out once, in a depth-first walk with one seen set: an edge to an id already emitted, the root included, is dropped.
+export function depTree(s: Snapshot, id: string, direction: Direction): TreeNode[] {
+  const byId = new Map(s.beads.map((b) => [b.id, b]));
+  const root = byId.get(id);
+  if (root === undefined) {
+    return [];
+  }
+  const [near, far] = direction === "down" ? (["from", "to"] as const) : (["to", "from"] as const);
+  const out = new Map<string, { id: string; type: string }[]>();
+  // relates-to is bd's two-way "see also" link, which bd dep tree does not follow either.
+  for (const e of s.edges.filter((e) => e.type !== "relates-to")) {
+    out.set(e[near], [...(out.get(e[near]) ?? []), { id: e[far], type: e.type }]);
+  }
+  const node = (b: Bead, depth: number, parent_id: string, edge: string | null): TreeNode => ({ id: b.id, title: b.title, status: b.status, priority: b.priority, issue_type: b.issue_type, depth, parent_id, edge_from_parent: edge });
+  const nodes = [node(root, 0, "", null)];
+  const seen = new Set([id]);
+  const walk = (from: string, depth: number): void => {
+    for (const e of out.get(from) ?? []) {
+      const b = byId.get(e.id);
+      if (b !== undefined && !seen.has(e.id)) {
+        seen.add(e.id);
+        nodes.push(node(b, depth, from, e.type));
+        if (depth < MAX_DEPTH) {
+          walk(e.id, depth + 1);
+        }
+      }
+    }
+  };
+  walk(id, 1);
+  return nodes;
+}
+
+// bd stores some criteria as `[ ] text` with no list marker, which markdown draws as literal brackets: only a list item is a task item.
+// shortcut: lines inside a fenced code block are rewritten too, upgrade if a bead ever quotes such a line in code.
+export const taskLists = (text: string): string => text.replace(/^([ \t]*)\[([ xX])\] /gm, "$1- [$2] ");
 
 // Where Send to agent types: the Opener if an agent runs there, else the agent of the Viewer's tab that changed last.
 export function pickTarget(opener: Opener, panes: PaneRef[], agents: AgentRef[]): Target | null {

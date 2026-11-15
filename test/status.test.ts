@@ -3,18 +3,14 @@ import assert from "node:assert/strict";
 import { keyFor, pickOptions, shownBead } from "../src/rows.ts";
 import { update } from "../src/update.ts";
 import type { BdError, Cmd, Model, Msg } from "../src/types.ts";
-import { bead, detail, modelOf, snapshot, steps } from "./model.ts";
+import { bead, modelOf, snapshot, steps } from "./model.ts";
 
 const BEADS = [bead("a-1", { priority: 0 }), bead("a-2", { priority: 1, status: "closed" }), bead("a-3", { priority: 2 })];
 const boom: BdError = { _tag: "BdRejected", code: 1, text: "boom" };
 const written = (id: string, to: string, error: BdError | null = null, second = false): Msg => ({ _tag: "Written", id, to, error, second });
 
-// Wide, the list loaded, the selected bead's detail arrived.
-function shown(id: string): Model {
-  const m = steps({ ...modelOf(BEADS), width: 1000 }, { _tag: "Loaded", res: { ok: true, value: snapshot(BEADS) } }, { _tag: "Select", id });
-  const p = m.details.get(id)?.show;
-  return steps(m, { _tag: "Shown", id, gen: p?._tag === "Loading" ? p.gen : -1, res: { ok: true, value: detail(id, { status: BEADS.find((b) => b.id === id)?.status ?? "open" }) } });
-}
+// Wide, the list loaded, the bead selected.
+const shown = (id: string): Model => steps({ ...modelOf(BEADS), width: 1000 }, { _tag: "Loaded", res: { ok: true, value: snapshot(BEADS) } }, { _tag: "Select", id });
 
 const write = (id: string, from: string, to: string, reason = ""): Cmd => ({ _tag: "Write", id, from, to, reason });
 
@@ -90,7 +86,7 @@ test("the picker is disabled for a bead while its write runs", () => {
   assert.deepEqual(update(busy, { _tag: "CloseWith", reason: "x" })[1], []);
 });
 
-test("success reloads the list and the bead's detail, and the pill spins until the load lands", () => {
+test("success reloads the list, which carries the bead's detail, and the pill spins until the load lands", () => {
   const [busy] = update(shown("a-1"), { _tag: "Pick", status: "in_progress" });
   const [m, cmds] = update(busy, written("a-1", "in_progress"));
   assert.equal(m.loading, true);
@@ -99,11 +95,8 @@ test("success reloads the list and the bead's detail, and the pill spins until t
   const changed = BEADS.map((b) => (b.id === "a-1" ? { ...b, status: "in_progress" } : b));
   const [loaded, more] = update(m, { _tag: "Loaded", res: { ok: true, value: snapshot(changed) } });
   assert.equal(loaded.writing.size, 0);
-  // The detail refetches at once, and until it lands the pill reads the list's new status.
-  assert.deepEqual(
-    more.filter((c) => c._tag === "Fetch").map((c) => c._tag === "Fetch" && c.part),
-    ["show", "down", "up", "comments"],
-  );
+  // The snapshot is the detail's source, so the pill shows the new status with nothing more to run.
+  assert.deepEqual(more, []);
   assert.equal(shownBead(loaded)?.status, "in_progress");
 });
 
@@ -177,4 +170,13 @@ test("reopen worked, update failed during a load: the list ends showing open, wi
   assert.equal(shownBead(final)?.status, "open");
   assert.deepEqual(final.writeError, { id: "a-2", error: boom, second: "in_progress" });
   assert.equal(final.writing.size, 0);
+});
+
+test("a failed write's error also clears when a link shows another bead", () => {
+  const [busy] = update(shown("a-1"), { _tag: "Pick", status: "in_progress" });
+  const m = update(busy, written("a-1", "in_progress", boom))[0];
+  assert.deepEqual(m.writeError?.id, "a-1");
+  assert.equal(update(m, { _tag: "Jump", id: "a-3" })[0].writeError, null);
+  // The same bead still on show keeps it.
+  assert.deepEqual(update(m, { _tag: "Resized", width: 1100 })[0].writeError, m.writeError);
 });

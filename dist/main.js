@@ -6,13 +6,13 @@ import { InputState, VirtualListScrollHandle } from "gpui-base";
 var Bad = class {
   path;
   detail;
-  constructor(path, detail2) {
+  constructor(path, detail) {
     this.path = path;
-    this.detail = detail2;
+    this.detail = detail;
   }
 };
-var bad = (path, detail2) => {
-  throw new Bad(path, detail2);
+var bad = (path, detail) => {
+  throw new Bad(path, detail);
 };
 function obj(v, path) {
   return typeof v === "object" && v !== null && !Array.isArray(v) ? v : bad(path, "expected an object");
@@ -41,17 +41,18 @@ function strings(o, k, path) {
   return o[k] == null ? [] : arr(o[k], `${path}.${k}`).map((x, i) => typeof x === "string" ? x : bad(`${path}.${k}[${i}]`, "expected a string"));
 }
 var each = (o, k, path, item) => arr(o[k], `${path}.${k}`).map((x, i) => item(obj(x, `${path}.${k}[${i}]`), `${path}.${k}[${i}]`));
-function decoder(read) {
+var parseJson = (text3) => {
+  try {
+    return JSON.parse(text3);
+  } catch {
+    return bad("$", "not JSON");
+  }
+};
+function decoder(read, parse = parseJson) {
   return (text3, version) => {
-    const fail2 = (path, detail2) => ({ ok: false, error: { _tag: "Undecodable", version, path, detail: detail2 } });
-    let json;
+    const fail2 = (path, detail) => ({ ok: false, error: { _tag: "Undecodable", version, path, detail } });
     try {
-      json = JSON.parse(text3);
-    } catch {
-      return fail2("$", "not JSON");
-    }
-    try {
-      return { ok: true, value: read(json) };
+      return { ok: true, value: read(parse(text3)) };
     } catch (e) {
       if (e instanceof Bad) {
         return fail2(e.path, e.detail);
@@ -60,7 +61,7 @@ function decoder(read) {
     }
   };
 }
-function bead(o, p) {
+function bead(o, p, parent) {
   return {
     id: str(o, "id", p),
     title: str(o, "title", p),
@@ -72,40 +73,13 @@ function bead(o, p) {
     created_at: str(o, "created_at", p),
     updated_at: str(o, "updated_at", p),
     closed_at: strOpt(o, "closed_at", p),
-    parent: strOpt(o, "parent", p),
+    parent,
     dependency_count: numOr0(o, "dependency_count", p),
     dependent_count: numOr0(o, "dependent_count", p),
     comment_count: numOr0(o, "comment_count", p)
   };
 }
-var link = (o, p) => ({
-  id: str(o, "id", p),
-  title: str(o, "title", p),
-  status: str(o, "status", p),
-  priority: num(o, "priority", p),
-  issue_type: str(o, "issue_type", p),
-  dependency_type: str(o, "dependency_type", p)
-});
-var detail = (o, p) => ({
-  ...bead(o, p),
-  description: strOr(o, "description", p),
-  design: strOr(o, "design", p),
-  acceptance_criteria: strOr(o, "acceptance_criteria", p),
-  notes: strOr(o, "notes", p),
-  dependencies: o.dependencies == null ? [] : each(o, "dependencies", p, link)
-});
-var node = (o, p) => ({
-  id: str(o, "id", p),
-  title: str(o, "title", p),
-  status: str(o, "status", p),
-  priority: num(o, "priority", p),
-  issue_type: str(o, "issue_type", p),
-  depth: num(o, "depth", p),
-  parent_id: strOr(o, "parent_id", p),
-  edge_from_parent: strOpt(o, "edge_from_parent", p)
-});
 var top = (json) => obj(json, "$");
-var decodeList = decoder((json) => arr(json, "$").map((x, i) => bead(obj(x, `$[${i}]`), `$[${i}]`)));
 var decodeReady = decoder((json) => arr(json, "$").map((x, i) => str(obj(x, `$[${i}]`), "id", `$[${i}]`)));
 var decodeBlocked = decoder(
   (json) => arr(json, "$").map((x, i) => {
@@ -114,18 +88,39 @@ var decodeBlocked = decoder(
     return { id: str(o, "id", p), blocked_by_count: num(o, "blocked_by_count", p), blocked_by: strings(o, "blocked_by", p) };
   })
 );
-var decodeShow = decoder((json) => {
-  const first = arr(json, "$")[0];
-  return first === void 0 ? bad("$[0]", "expected a bead") : detail(obj(first, "$[0]"), "$[0]");
+var lines = (text3) => text3.split("\n").map((line, i) => {
+  try {
+    return line.trim() === "" ? void 0 : JSON.parse(line);
+  } catch {
+    return bad(`$[${i}]`, "not JSON");
+  }
 });
-var decodeTree = decoder((json) => arr(json, "$").map((x, i) => node(obj(x, `$[${i}]`), `$[${i}]`)));
-var decodeComments = decoder(
-  (json) => arr(json, "$").map((x, i) => {
+var comment = (o, p) => ({ id: str(o, "id", p), author: str(o, "author", p), text: str(o, "text", p), created_at: str(o, "created_at", p) });
+var decodeExport = decoder((json) => {
+  const beads = [];
+  const edges = [];
+  json.forEach((x, i) => {
+    if (x === void 0) {
+      return;
+    }
     const p = `$[${i}]`;
     const o = obj(x, p);
-    return { id: str(o, "id", p), author: str(o, "author", p), text: str(o, "text", p), created_at: str(o, "created_at", p) };
-  })
-);
+    if (o._type != null && o._type !== "issue") {
+      return;
+    }
+    const own = o.dependencies == null ? [] : each(o, "dependencies", p, (d, dp) => ({ from: str(d, "issue_id", dp), to: str(d, "depends_on_id", dp), type: str(d, "type", dp) }));
+    edges.push(...own);
+    beads.push({
+      ...bead(o, p, own.find((e) => e.type === "parent-child")?.to ?? null),
+      description: strOr(o, "description", p),
+      design: strOr(o, "design", p),
+      acceptance_criteria: strOr(o, "acceptance_criteria", p),
+      notes: strOr(o, "notes", p),
+      comments: o.comments == null ? [] : each(o, "comments", p, comment)
+    });
+  });
+  return { beads, edges };
+}, lines);
 var status = (icon2) => (o, p) => ({ name: str(o, "name", p), icon: icon2(o, "icon", p), category: str(o, "category", p) });
 var decodeStatuses = decoder((json) => {
   const o = top(json);
@@ -241,21 +236,16 @@ function treeRows(nodes) {
       kids.set(n.parent_id, [...kids.get(n.parent_id) ?? [], n]);
     }
   }
-  const roots = nodes.filter((n) => n.depth === 0);
-  const seen = new Set(roots.map((n) => n.id));
   const rows = [];
   const walk = (parent, guides) => {
     const list2 = kids.get(parent) ?? [];
     list2.forEach((n, i) => {
-      const [last, repeat] = [i === list2.length - 1, seen.has(n.id)];
-      seen.add(n.id);
-      rows.push({ id: n.id, title: n.title, status: n.status, edge: n.edge_from_parent ?? "", depth: guides.length + 1, guides, last, repeat });
-      if (!repeat) {
-        walk(n.id, [...guides, !last]);
-      }
+      const last = i === list2.length - 1;
+      rows.push({ id: n.id, title: n.title, status: n.status, edge: n.edge_from_parent ?? "", depth: guides.length + 1, guides, last });
+      walk(n.id, [...guides, !last]);
     });
   };
-  roots.forEach((r) => walk(r.id, []));
+  nodes.filter((n) => n.depth === 0).forEach((r) => walk(r.id, []));
   return rows;
 }
 var textSections = (d) => [
@@ -277,11 +267,39 @@ function statusOptions(m) {
 }
 function shownBead(m) {
   const id = shownId(m);
-  const p = id === null ? void 0 : m.details.get(id)?.show;
-  const d = p?._tag === "Ready" ? p.value : p?._tag === "Loading" ? p.prev : null;
-  const status2 = m.snapshot?.beads.find((b) => b.id === id)?.status;
-  return d === null || status2 === void 0 ? d : { ...d, status: status2 };
+  return id === null ? null : m.snapshot?.beads.find((b) => b.id === id) ?? null;
 }
+var MAX_DEPTH = 50;
+function depTree(s, id, direction) {
+  const byId = new Map(s.beads.map((b) => [b.id, b]));
+  const root = byId.get(id);
+  if (root === void 0) {
+    return [];
+  }
+  const [near, far] = direction === "down" ? ["from", "to"] : ["to", "from"];
+  const out = /* @__PURE__ */ new Map();
+  for (const e of s.edges.filter((e2) => e2.type !== "relates-to")) {
+    out.set(e[near], [...out.get(e[near]) ?? [], { id: e[far], type: e.type }]);
+  }
+  const node = (b, depth, parent_id, edge) => ({ id: b.id, title: b.title, status: b.status, priority: b.priority, issue_type: b.issue_type, depth, parent_id, edge_from_parent: edge });
+  const nodes = [node(root, 0, "", null)];
+  const seen = /* @__PURE__ */ new Set([id]);
+  const walk = (from, depth) => {
+    for (const e of out.get(from) ?? []) {
+      const b = byId.get(e.id);
+      if (b !== void 0 && !seen.has(e.id)) {
+        seen.add(e.id);
+        nodes.push(node(b, depth, from, e.type));
+        if (depth < MAX_DEPTH) {
+          walk(e.id, depth + 1);
+        }
+      }
+    }
+  };
+  walk(id, 1);
+  return nodes;
+}
+var taskLists = (text3) => text3.replace(/^([ \t]*)\[([ xX])\] /gm, "$1- [$2] ");
 function pickTarget(opener, panes2, agents2) {
   const there = panes2.find((p) => p.terminal !== null && p.terminal === opener.terminal && p.status !== null);
   if (there?.terminal != null) {
@@ -376,8 +394,6 @@ var initModel = (opener = { terminal: null, tab: null }) => ({
   shown: null,
   back: [],
   forward: [],
-  details: /* @__PURE__ */ new Map(),
-  gen: 0,
   width: 0,
   pane: "list",
   searching: false,
@@ -394,42 +410,7 @@ var initModel = (opener = { terminal: null, tab: null }) => ({
 });
 function update(m, msg) {
   const [next, cmds] = step(m, msg);
-  const [settled, more] = settle(next.writeError !== null && next.writeError.id !== shownId(next) ? { ...next, writeError: null } : next);
-  return [settled, more.length === 0 ? cmds : [...cmds, ...more]];
-}
-var PARTS = ["show", "down", "up", "comments"];
-var toPart = (res) => res.ok ? { _tag: "Ready", value: res.value } : { _tag: "Failed", error: res.error };
-var prevOf = (p) => p?._tag === "Ready" ? p.value : p?._tag === "Loading" ? p.prev : null;
-var isLoading = (d) => PARTS.some((p) => d[p]._tag === "Loading");
-var fetch = (id, part, gen) => ({ _tag: "Fetch", id, part, gen });
-var wait = (id, gen, timer) => ({ _tag: "Wait", id, gen, timer });
-function begin(id, gen, old, debounce) {
-  const loading = (p) => ({ _tag: "Loading", prev: prevOf(p), gen });
-  const detail2 = { show: loading(old?.show), down: loading(old?.down), up: loading(old?.up), comments: loading(old?.comments), slow: false };
-  return [detail2, [...debounce ? [wait(id, gen, "fetch")] : PARTS.map((part) => fetch(id, part, gen)), wait(id, gen, "loading")]];
-}
-function waiting(m, id, part, gen) {
-  const d = m.details.get(id);
-  const p = d?.[part];
-  return d !== void 0 && id === shownId(m) && p?._tag === "Loading" && p.gen === gen ? d : void 0;
-}
-function patch(m, id, part, gen, change) {
-  const d = waiting(m, id, part, gen);
-  return d === void 0 ? m : { ...m, details: new Map(m.details).set(id, { ...d, ...change }) };
-}
-function settle(m) {
-  const id = shownId(m);
-  const keep = [...m.details].filter(([k, d2]) => k === id || !isLoading(d2));
-  if (keep.length === m.details.size && (id === null || m.details.has(id))) {
-    return [m, []];
-  }
-  const details = new Map(keep);
-  if (id === null || details.has(id)) {
-    return [{ ...m, details }, []];
-  }
-  const gen = m.gen + 1;
-  const [d, cmds] = begin(id, gen, void 0, true);
-  return [{ ...m, gen, details: details.set(id, d) }, cmds];
+  return [next.writeError !== null && next.writeError.id !== shownId(next) ? { ...next, writeError: null } : next, cmds];
 }
 var pick = (m, id) => ({ ...m, selected: id, shown: null });
 var land = (m, id) => visible(m).some((b) => b.id === id) ? pick(m, id) : { ...m, shown: id };
@@ -453,14 +434,7 @@ function step(m, msg) {
       if (!msg.res.ok) {
         return [{ ...m, loading: false, slow: false, error: msg.res.error, writing }, []];
       }
-      const next = reselect({ ...m, loading: false, slow: false, error: null, snapshot: msg.res.value, writing });
-      const id = shownId(next);
-      if (id === null) {
-        return [{ ...next, details: /* @__PURE__ */ new Map() }, []];
-      }
-      const gen = m.gen + 1;
-      const [d, cmds] = begin(id, gen, m.details.get(id), false);
-      return [{ ...next, gen, details: /* @__PURE__ */ new Map([[id, d]]) }, cmds];
+      return [reselect({ ...m, loading: false, slow: false, error: null, snapshot: msg.res.value, writing }), []];
     }
     case "ToggleReady":
       return [reselect({ ...m, filters: { ...m.filters, ready: !m.filters.ready } }), []];
@@ -519,17 +493,6 @@ function step(m, msg) {
     }
     case "ShowKeys":
       return [m, []];
-    case "Shown":
-      return [patch(m, msg.id, "show", msg.gen, { show: toPart(msg.res) }), []];
-    case "Tree":
-      return [patch(m, msg.id, msg.direction, msg.gen, msg.direction === "down" ? { down: toPart(msg.res) } : { up: toPart(msg.res) }), []];
-    case "Discussed":
-      return [patch(m, msg.id, "comments", msg.gen, { comments: toPart(msg.res) }), []];
-    case "Waited":
-      if (msg.timer === "loading") {
-        return [patch(m, msg.id, "show", msg.gen, { slow: true }), []];
-      }
-      return [m, waiting(m, msg.id, "show", msg.gen) === void 0 ? [] : PARTS.map((part) => fetch(msg.id, part, msg.gen))];
     case "ReadStatuses":
       return [m, [{ _tag: "Statuses" }]];
     case "StatusesRead":
@@ -573,17 +536,6 @@ function step(m, msg) {
       return flash({ ...m, sending: false }, sendText(msg.error));
     case "Faded":
       return [msg.what === "copied" ? m.copied?.n === msg.n ? { ...m, copied: null } : m : m.sent?.n === msg.n ? { ...m, sent: null } : m, []];
-    case "Retry": {
-      const id = shownId(m);
-      const d = id === null ? void 0 : m.details.get(id);
-      if (id === null || d === void 0) {
-        return [m, []];
-      }
-      const gen = m.gen + 1;
-      const again = { ...d, slow: msg.part === "show" ? false : d.slow };
-      again[msg.part] = { _tag: "Loading", prev: null, gen };
-      return [{ ...m, gen, details: new Map(m.details).set(id, again) }, msg.part === "show" ? [fetch(id, "show", gen), wait(id, gen, "loading")] : [fetch(id, msg.part, gen)]];
-    }
   }
 }
 function flash(m, text3) {
@@ -640,7 +592,7 @@ var bdText = (e) => e._tag === "Undecodable" ? `bd ${e.version ?? "(version unkn
 // src/runner.ts
 var BD_TIMEOUT_MS = 15e3;
 var RETRY_DELAYS_MS = [300, 900];
-var WAIT_MS = { fetch: 120, loading: 150 };
+var WAIT_LOAD_MS = 150;
 var FADE_MS = 1200;
 var FOCUS_POLL_MS = 50;
 var FOCUS_POLLS = 30;
@@ -716,12 +668,9 @@ async function bdJson(host, root, args, decode) {
   }
   return decode(out.value, await bdVersion(host, root));
 }
-var listBeads = (host, root) => bdJson(host, root, ["list", "--all", "-n", "0", "--brief", "--json"], decodeList);
+var exportBeads = (host, root) => bdJson(host, root, ["export"], decodeExport);
 var readyIds = (host, root) => bdJson(host, root, ["ready", "-n", "0", "--json"], decodeReady);
 var blockedBeads = (host, root) => bdJson(host, root, ["blocked", "--json"], decodeBlocked);
-var showBead = (host, root, id) => bdJson(host, root, ["show", id, "--json"], decodeShow);
-var depTree = (host, root, id, direction) => bdJson(host, root, ["dep", "tree", id, `--direction=${direction}`, "--json"], decodeTree);
-var beadComments = (host, root, id) => bdJson(host, root, ["comments", id, "--json"], decodeComments);
 var statuses = (host, root) => bdJson(host, root, ["statuses", "--json"], decodeStatuses);
 var updateStatus = (host, root, id, status2) => bd(host, root, ["update", id, "--status", status2]);
 var closeBead = (host, root, id, reason) => bd(host, root, ["close", id, ...reason === "" ? [] : ["--reason", reason]]);
@@ -770,9 +719,9 @@ async function send(host, { id, title, opener }) {
 async function run2(host, root, cmd) {
   switch (cmd._tag) {
     case "Load": {
-      const [beads, ready, blocked] = await Promise.all([listBeads(host, root), readyIds(host, root), blockedBeads(host, root)]);
-      if (!beads.ok) {
-        return { _tag: "Loaded", res: beads };
+      const [exported, ready, blocked] = await Promise.all([exportBeads(host, root), readyIds(host, root), blockedBeads(host, root)]);
+      if (!exported.ok) {
+        return { _tag: "Loaded", res: exported };
       }
       if (!ready.ok) {
         return { _tag: "Loaded", res: ready };
@@ -781,24 +730,11 @@ async function run2(host, root, cmd) {
         return { _tag: "Loaded", res: blocked };
       }
       const locks = new Map(blocked.value.map((b) => [b.id, b.blocked_by_count]));
-      return { _tag: "Loaded", res: { ok: true, value: { beads: beads.value, ready: new Set(ready.value), locks } } };
+      return { _tag: "Loaded", res: { ok: true, value: { ...exported.value, ready: new Set(ready.value), locks } } };
     }
     case "WaitLoad":
-      await host.sleep(WAIT_MS.loading);
+      await host.sleep(WAIT_LOAD_MS);
       return { _tag: "Slowed", n: cmd.n };
-    case "Fetch":
-      switch (cmd.part) {
-        case "show":
-          return { _tag: "Shown", id: cmd.id, gen: cmd.gen, res: await showBead(host, root, cmd.id) };
-        case "down":
-        case "up":
-          return { _tag: "Tree", id: cmd.id, gen: cmd.gen, direction: cmd.part, res: await depTree(host, root, cmd.id, cmd.part) };
-        case "comments":
-          return { _tag: "Discussed", id: cmd.id, gen: cmd.gen, res: await beadComments(host, root, cmd.id) };
-      }
-    case "Wait":
-      await host.sleep(WAIT_MS[cmd.timer]);
-      return { _tag: "Waited", id: cmd.id, gen: cmd.gen, timer: cmd.timer };
     case "Statuses":
       return { _tag: "StatusesRead", res: await statuses(host, root) };
     case "Write":
@@ -1048,11 +984,8 @@ function keysDialog(t, mono, nav, close) {
 }
 var heading = (label, t) => div().text_size(11).font_semibold().text_color(t.muted).child(label.toUpperCase());
 var section = (label, t, ...body) => v_flex().gap(4).flex_none().child(heading(label, t)).children(body);
-var markdown = (id, text3) => TextView.markdown(id, text3).selectable(true).scrollable(false).w_full().min_w(0);
+var markdown = (id, text3) => TextView.markdown(id, taskLists(text3)).selectable(true).scrollable(false).w_full().min_w(0);
 var red = (t) => pick2(t, "red", "ansi1");
-function failed(label, error, part, t, dispatch) {
-  return section(label, t, div().text_size(12).text_color(red(t)).child(bdText(error)), h_flex2().child(button(`retry-${part}`, "Retry", false, t, () => dispatch({ _tag: "Retry", part }))));
-}
 var GUIDE = 14;
 function treeRow(r, key, t, dispatch, mono) {
   const line = (e) => e.border_l(1).border_color(t.border);
@@ -1063,7 +996,7 @@ function treeRow(r, key, t, dispatch, mono) {
   ) : line(div().w(GUIDE).h(ROW_H).flex_none()).child(
     div().w(10).h(ROW_H / 2).border_b(1).border_color(t.border)
   );
-  return h_flex2().h(ROW_H).flex_none().gap(6).items_center().text_size(12).opacity(r.repeat ? 0.5 : 1).child(
+  return h_flex2().h(ROW_H).flex_none().gap(6).items_center().text_size(12).child(
     h_flex2().flex_none().children([...r.guides.map((on) => on ? line(div().w(GUIDE).h(ROW_H).flex_none()) : div().w(GUIDE).h(ROW_H).flex_none()), own])
   ).child(div().w(8).h(8).flex_none().rounded(4).bg(statusColor(r.status, t))).child(
     div().id(key).flex_none().font_family(mono).text_size(11).text_color(t.accent).cursor_pointer().hover((s) => s.underline()).on_click((_e, cx) => {
@@ -1072,14 +1005,7 @@ function treeRow(r, key, t, dispatch, mono) {
     }).child(r.id)
   ).child(div().flex_1().min_w(0).truncate().child(r.title)).child(div().flex_none().text_size(11).text_color(t.muted).child(r.edge));
 }
-function tree(label, part, p, empty, t, dispatch, mono) {
-  if (p._tag === "Failed") {
-    return [failed(label, p.error, part, t, dispatch)];
-  }
-  const nodes = p._tag === "Ready" ? p.value : p.prev;
-  if (nodes === null) {
-    return [];
-  }
+function tree(label, part, nodes, empty, t, dispatch, mono) {
   const rows = treeRows(nodes);
   return [section(`${label} (${rows.length})`, t, ...rows.length === 0 ? [div().text_size(12).text_color(t.muted).child(empty)] : rows.map((r, i) => treeRow(r, `${part}-${i}`, t, dispatch, mono)))];
 }
@@ -1140,9 +1066,8 @@ function metaRow(b, m, t, dispatch, ui, now) {
   );
 }
 var writeText = (w) => w.second === null ? bdText(w.error) : `bd reopen worked, but bd update --status ${w.second} failed: ${bdText(w.error)}`;
-function beadBody(d, e, m, hidden, t, dispatch, ui, now) {
-  const comments = e.comments._tag === "Ready" ? e.comments.value : e.comments._tag === "Loading" ? e.comments.prev ?? [] : [];
-  const sorted = [...comments].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+function beadBody(d, s, m, hidden, t, dispatch, ui, now) {
+  const sorted = [...d.comments].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
   return [
     h_flex2().gap(8).items_start().flex_none().child(
       svg2(icon(TYPE_ICON.has(d.issue_type) ? d.issue_type : "task")).size(18).flex_none().text_color(t.dim)
@@ -1158,9 +1083,8 @@ function beadBody(d, e, m, hidden, t, dispatch, ui, now) {
       )
     ).child(sendButton(m, t, dispatch, ui)),
     ...textSections(d).map(([label, text3]) => section(label, t, markdown(`md-${d.id}-${label}`, text3))),
-    ...tree("Blocked by", "down", e.down, "Nothing blocks this bead.", t, dispatch, ui.mono),
-    ...tree("Blocks", "up", e.up, "This bead blocks nothing.", t, dispatch, ui.mono),
-    ...e.comments._tag === "Failed" ? [failed("Comments", e.comments.error, "comments", t, dispatch)] : [],
+    ...tree("Blocked by", "down", depTree(s, d.id, "down"), "Nothing blocks this bead.", t, dispatch, ui.mono),
+    ...tree("Blocks", "up", depTree(s, d.id, "up"), "This bead blocks nothing.", t, dispatch, ui.mono),
     ...sorted.length === 0 ? [] : [
       section(
         `Comments (${sorted.length})`,
@@ -1176,29 +1100,18 @@ function beadBody(d, e, m, hidden, t, dispatch, ui, now) {
 }
 function detailBody(m, rows, t, dispatch, ui, now) {
   const id = shownId(m);
-  const note = (text3, color = t.muted) => div().flex_none().text_size(12).text_color(color).child(text3);
+  const note = (text3) => div().flex_none().text_size(12).text_color(t.muted).child(text3);
   if (id === null) {
     return [note("Select a bead")];
   }
-  const entry = m.details.get(id);
-  if (entry === void 0) {
-    return [];
-  }
-  const show = entry.show;
-  if (show._tag === "Failed") {
-    return show.error._tag === "BeadGone" ? [
+  const [bead2, s] = [shownBead(m), m.snapshot];
+  if (bead2 === null || s === null) {
+    return [
       note(`${id} no longer exists`),
       h_flex2().flex_none().child(button("refresh-gone", "Refresh", false, t, () => dispatch({ _tag: "Refresh" })))
-    ] : [
-      note(bdText(show.error), red(t)),
-      h_flex2().flex_none().child(button("retry-show", "Retry", false, t, () => dispatch({ _tag: "Retry", part: "show" })))
     ];
   }
-  const bead2 = shownBead(m);
-  if (bead2 === null) {
-    return entry.slow ? [note("Loading")] : [];
-  }
-  return beadBody(bead2, entry, m, hiddenByFilters(m, rows), t, dispatch, ui, now);
+  return beadBody(bead2, s, m, hiddenByFilters(m, rows), t, dispatch, ui, now);
 }
 function detailPane(m, rows, t, dispatch, ui, narrow, now) {
   const scroll = `detail-${shownId(m) ?? "none"}`;

@@ -1,6 +1,6 @@
 // The reducer: (Model, Msg) -> (Model, Cmd[]). Pure. Single flight: a refresh during a load is dropped.
 import { BUILT_IN_STATUSES, initFilters, initSort, isWide, reselect, sendText, shownBead, shownId, visible } from "./rows.ts";
-import type { Cmd, Detail, Model, Msg, Opener, Part, PartName, Res, Timer } from "./types.ts";
+import type { Cmd, Model, Msg, Opener } from "./types.ts";
 
 export const initModel = (opener: Opener = { terminal: null, tab: null }): Model => ({
   snapshot: null,
@@ -14,8 +14,6 @@ export const initModel = (opener: Opener = { terminal: null, tab: null }): Model
   shown: null,
   back: [],
   forward: [],
-  details: new Map(),
-  gen: 0,
   width: 0,
   pane: "list",
   searching: false,
@@ -31,56 +29,11 @@ export const initModel = (opener: Opener = { terminal: null, tab: null }): Model
   sent: null,
 });
 
-// A load fills the list, so the viewer opens by sending Refresh. After every message the shown bead's detail is started if it is missing.
+// A load fills the list and every bead's detail, so the viewer opens by sending Refresh and no other message runs bd for a read.
 export function update(m: Model, msg: Msg): [Model, Cmd[]] {
   const [next, cmds] = step(m, msg);
   // A failed write's error stays until the next action: another bead on show, or a new write or picker.
-  const [settled, more] = settle(next.writeError !== null && next.writeError.id !== shownId(next) ? { ...next, writeError: null } : next);
-  return [settled, more.length === 0 ? cmds : [...cmds, ...more]];
-}
-
-const PARTS: PartName[] = ["show", "down", "up", "comments"];
-const toPart = <T>(res: Res<T>): Part<T> => (res.ok ? { _tag: "Ready", value: res.value } : { _tag: "Failed", error: res.error });
-const prevOf = <T>(p: Part<T> | undefined): T | null => (p?._tag === "Ready" ? p.value : p?._tag === "Loading" ? p.prev : null);
-const isLoading = (d: Detail): boolean => PARTS.some((p) => d[p]._tag === "Loading");
-const fetch = (id: string, part: PartName, gen: number): Cmd => ({ _tag: "Fetch", id, part, gen });
-const wait = (id: string, gen: number, timer: Timer): Cmd => ({ _tag: "Wait", id, gen, timer });
-
-// Every call of a bead's detail under one request number. `old` is what the bead showed before a reload. A bead that has just
-// been shown waits before asking bd, so passing over it costs nothing; a reload asks at once.
-function begin(id: string, gen: number, old: Detail | undefined, debounce: boolean): [Detail, Cmd[]] {
-  const loading = <T>(p: Part<T> | undefined): Part<T> => ({ _tag: "Loading", prev: prevOf(p), gen });
-  const detail: Detail = { show: loading(old?.show), down: loading(old?.down), up: loading(old?.up), comments: loading(old?.comments), slow: false };
-  return [detail, [...(debounce ? [wait(id, gen, "fetch")] : PARTS.map((part) => fetch(id, part, gen))), wait(id, gen, "loading")]];
-}
-
-// The entry of the shown bead whose `part` is still waiting for request `gen`. A reply or timer of an earlier request, or for a
-// bead that is no longer shown, finds none and is dropped.
-function waiting(m: Model, id: string, part: PartName, gen: number): Detail | undefined {
-  const d = m.details.get(id);
-  const p = d?.[part];
-  return d !== undefined && id === shownId(m) && p?._tag === "Loading" && p.gen === gen ? d : undefined;
-}
-
-function patch(m: Model, id: string, part: PartName, gen: number, change: Partial<Detail>): Model {
-  const d = waiting(m, id, part, gen);
-  return d === undefined ? m : { ...m, details: new Map(m.details).set(id, { ...d, ...change }) };
-}
-
-// Calls of a bead that is no longer shown are abandoned, so it is fetched afresh when it comes back; finished ones stay cached.
-function settle(m: Model): [Model, Cmd[]] {
-  const id = shownId(m);
-  const keep = [...m.details].filter(([k, d]) => k === id || !isLoading(d));
-  if (keep.length === m.details.size && (id === null || m.details.has(id))) {
-    return [m, []];
-  }
-  const details = new Map(keep);
-  if (id === null || details.has(id)) {
-    return [{ ...m, details }, []];
-  }
-  const gen = m.gen + 1;
-  const [d, cmds] = begin(id, gen, undefined, true);
-  return [{ ...m, gen, details: details.set(id, d) }, cmds];
+  return [next.writeError !== null && next.writeError.id !== shownId(next) ? { ...next, writeError: null } : next, cmds];
 }
 
 // A list action puts the detail back on the selected bead, whatever a link had shown.
@@ -115,15 +68,8 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
       if (!msg.res.ok) {
         return [{ ...m, loading: false, slow: false, error: msg.res.error, writing }, []];
       }
-      // The beads may have changed, so no cached detail is kept; the shown one reloads under what it showed.
-      const next = reselect({ ...m, loading: false, slow: false, error: null, snapshot: msg.res.value, writing });
-      const id = shownId(next);
-      if (id === null) {
-        return [{ ...next, details: new Map() }, []];
-      }
-      const gen = m.gen + 1;
-      const [d, cmds] = begin(id, gen, m.details.get(id), false);
-      return [{ ...next, gen, details: new Map([[id, d]]) }, cmds];
+      // The snapshot carries every detail, so the shown bead redraws from it at once.
+      return [reselect({ ...m, loading: false, slow: false, error: null, snapshot: msg.res.value, writing }), []];
     }
     case "ToggleReady":
       return [reselect({ ...m, filters: { ...m.filters, ready: !m.filters.ready } }), []];
@@ -188,18 +134,6 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
     case "ShowKeys":
       // main.ts opens the keys as a dialog, which closes itself (Esc, a press outside): nothing here to keep in step.
       return [m, []];
-    case "Shown":
-      return [patch(m, msg.id, "show", msg.gen, { show: toPart(msg.res) }), []];
-    case "Tree":
-      return [patch(m, msg.id, msg.direction, msg.gen, msg.direction === "down" ? { down: toPart(msg.res) } : { up: toPart(msg.res) }), []];
-    case "Discussed":
-      return [patch(m, msg.id, "comments", msg.gen, { comments: toPart(msg.res) }), []];
-    case "Waited":
-      // The show call stands for the bead: all four started under one number, and it is the one the Loading line waits on.
-      if (msg.timer === "loading") {
-        return [patch(m, msg.id, "show", msg.gen, { slow: true }), []];
-      }
-      return [m, waiting(m, msg.id, "show", msg.gen) === undefined ? [] : PARTS.map((part) => fetch(msg.id, part, msg.gen))];
     case "ReadStatuses":
       return [m, [{ _tag: "Statuses" }]];
     case "StatusesRead":
@@ -223,7 +157,7 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
         writing.delete(msg.id);
         return [{ ...m, writing, writeError: { id: msg.id, error: msg.error, second: null } }, []];
       }
-      // Done, or the bead is open and only the second step failed: either way the list and that bead's detail load again.
+      // Done, or the bead is open and only the second step failed: either way the list loads again, and with it that bead's detail.
       writing.set(msg.id, "reloading");
       const writeError = msg.error === null ? m.writeError : { id: msg.id, error: msg.error, second: msg.to };
       return m.loading ? [{ ...m, writing, writeError, reload: true }, []] : step({ ...m, writing, writeError }, { _tag: "Refresh" });
@@ -247,17 +181,6 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
       return flash({ ...m, sending: false }, sendText(msg.error));
     case "Faded":
       return [msg.what === "copied" ? (m.copied?.n === msg.n ? { ...m, copied: null } : m) : m.sent?.n === msg.n ? { ...m, sent: null } : m, []];
-    case "Retry": {
-      const id = shownId(m);
-      const d = id === null ? undefined : m.details.get(id);
-      if (id === null || d === undefined) {
-        return [m, []];
-      }
-      const gen = m.gen + 1;
-      const again: Detail = { ...d, slow: msg.part === "show" ? false : d.slow };
-      again[msg.part] = { _tag: "Loading", prev: null, gen };
-      return [{ ...m, gen, details: new Map(m.details).set(id, again) }, msg.part === "show" ? [fetch(id, "show", gen), wait(id, gen, "loading")] : [fetch(id, msg.part, gen)]];
-    }
   }
 }
 

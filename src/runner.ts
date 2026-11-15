@@ -1,15 +1,14 @@
 // Runs bd in the Viewed repo and returns a value: the decoded data or a tagged BdError. Nothing here throws.
-import { decodeAgents, decodeBlocked, decodeComments, decodeFocus, decodeList, decodePanes, decodeReady, decodeShow, decodeStatuses, decodeTree } from "./decode.ts";
+import { decodeAgents, decodeBlocked, decodeExport, decodeFocus, decodePanes, decodeReady, decodeStatuses } from "./decode.ts";
 import type { ExecResult, Host } from "./host.ts";
 import { pickTarget } from "./rows.ts";
-import type { BdError, Cmd, Direction, Msg, Res, Timer } from "./types.ts";
+import type { BdError, Cmd, Msg, Res } from "./types.ts";
 
 const BD_TIMEOUT_MS = 15_000;
 // Another bd process can hold the database for a moment, so a locked or slow call is tried twice more.
 const RETRY_DELAYS_MS = [300, 900];
-// A bead must stay shown this long before bd is asked about it, so holding j runs bd only for the bead it stops on.
-// A detail still empty after the second shows "Loading", so a fast bd never flashes it. Both count from the selection.
-export const WAIT_MS: Record<Timer, number> = { fetch: 120, loading: 150 };
+// A first load still running this long shows "Loading", so a fast bd never flashes it.
+export const WAIT_LOAD_MS = 150;
 // How long "Copied" and "Sent to <agent>" stay on the button.
 export const FADE_MS = 1200;
 // pane.focus lands about 100 ms after run() returns; this is the poll and its limit.
@@ -42,7 +41,7 @@ export function classify(result: ExecResult): BdError {
   if (text.includes("maintenance operation is running")) {
     return { _tag: "BdLocked", text };
   }
-  // show: "Issue <id> not found" or "no issues found matching"; dep tree and comments: "no issue found matching".
+  // A write to a bead deleted since the load: "Issue <id> not found", or "no issue(s) found matching" when bd resolves the id.
   if (/^Issue \S+ not found/m.test(text) || /no issues? found matching/.test(text)) {
     return { _tag: "BeadGone", text };
   }
@@ -107,12 +106,9 @@ export async function bdJson<T>(host: Host, root: string, args: string[], decode
   return decode(out.value, await bdVersion(host, root));
 }
 
-export const listBeads = (host: Host, root: string) => bdJson(host, root, ["list", "--all", "-n", "0", "--brief", "--json"], decodeList);
+export const exportBeads = (host: Host, root: string) => bdJson(host, root, ["export"], decodeExport);
 export const readyIds = (host: Host, root: string) => bdJson(host, root, ["ready", "-n", "0", "--json"], decodeReady);
 export const blockedBeads = (host: Host, root: string) => bdJson(host, root, ["blocked", "--json"], decodeBlocked);
-export const showBead = (host: Host, root: string, id: string) => bdJson(host, root, ["show", id, "--json"], decodeShow);
-export const depTree = (host: Host, root: string, id: string, direction: Direction) => bdJson(host, root, ["dep", "tree", id, `--direction=${direction}`, "--json"], decodeTree);
-export const beadComments = (host: Host, root: string, id: string) => bdJson(host, root, ["comments", id, "--json"], decodeComments);
 export const statuses = (host: Host, root: string) => bdJson(host, root, ["statuses", "--json"], decodeStatuses);
 
 // A status write is the same call again when it is retried, so the runner's lock retry covers these too.
@@ -168,13 +164,13 @@ async function send(host: Host, { id, title, opener }: Extract<Cmd, { _tag: "Sen
   }
 }
 
-// Runs a Cmd and answers with a Msg. The three list reads go at once; the first error in list, ready, blocked order wins.
+// Runs a Cmd and answers with a Msg. The three load reads go at once; the first error in export, ready, blocked order wins.
 export async function run(host: Host, root: string, cmd: Cmd): Promise<Msg> {
   switch (cmd._tag) {
     case "Load": {
-      const [beads, ready, blocked] = await Promise.all([listBeads(host, root), readyIds(host, root), blockedBeads(host, root)]);
-      if (!beads.ok) {
-        return { _tag: "Loaded", res: beads };
+      const [exported, ready, blocked] = await Promise.all([exportBeads(host, root), readyIds(host, root), blockedBeads(host, root)]);
+      if (!exported.ok) {
+        return { _tag: "Loaded", res: exported };
       }
       if (!ready.ok) {
         return { _tag: "Loaded", res: ready };
@@ -183,24 +179,11 @@ export async function run(host: Host, root: string, cmd: Cmd): Promise<Msg> {
         return { _tag: "Loaded", res: blocked };
       }
       const locks = new Map(blocked.value.map((b) => [b.id, b.blocked_by_count]));
-      return { _tag: "Loaded", res: { ok: true, value: { beads: beads.value, ready: new Set(ready.value), locks } } };
+      return { _tag: "Loaded", res: { ok: true, value: { ...exported.value, ready: new Set(ready.value), locks } } };
     }
     case "WaitLoad":
-      await host.sleep(WAIT_MS.loading);
+      await host.sleep(WAIT_LOAD_MS);
       return { _tag: "Slowed", n: cmd.n };
-    case "Fetch":
-      switch (cmd.part) {
-        case "show":
-          return { _tag: "Shown", id: cmd.id, gen: cmd.gen, res: await showBead(host, root, cmd.id) };
-        case "down":
-        case "up":
-          return { _tag: "Tree", id: cmd.id, gen: cmd.gen, direction: cmd.part, res: await depTree(host, root, cmd.id, cmd.part) };
-        case "comments":
-          return { _tag: "Discussed", id: cmd.id, gen: cmd.gen, res: await beadComments(host, root, cmd.id) };
-      }
-    case "Wait":
-      await host.sleep(WAIT_MS[cmd.timer]);
-      return { _tag: "Waited", id: cmd.id, gen: cmd.gen, timer: cmd.timer };
     case "Statuses":
       return { _tag: "StatusesRead", res: await statuses(host, root) };
     case "Write":

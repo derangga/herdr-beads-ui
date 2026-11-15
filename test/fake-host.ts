@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import type { ExecResult, Host } from "../src/host.ts";
 
-export const fixture = (name: string): string => readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8");
+export const fixture = (name: string, ext = "json"): string => readFileSync(new URL(`./fixtures/${name}.${ext}`, import.meta.url), "utf8");
 
 export type Reply = ExecResult | Error;
 export type Call = { command: string; args: string[]; cwd?: string; timeout?: number };

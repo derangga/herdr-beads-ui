@@ -114,7 +114,7 @@ test("a refresh during a refresh is dropped, and its reply still ends the one lo
   s.dispatch(refresh);
   s.dispatch(refresh);
   await done();
-  assert.equal(calls.filter((c) => c.args[0] === "list").length, 1);
+  assert.equal(calls.filter((c) => c.args[0] === "export").length, 1);
   assert.equal(s.model.loading, false);
 });
 

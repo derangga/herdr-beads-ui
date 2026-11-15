@@ -1,8 +1,8 @@
 // Beads and models built by hand for the list tests. Only the tests use it.
 import { initModel, update } from "../src/update.ts";
-import type { Bead, BeadDetail, Model, Msg, Snapshot } from "../src/types.ts";
+import type { BeadDetail, Edge, Model, Msg, Snapshot } from "../src/types.ts";
 
-export const bead = (id: string, over: Partial<Bead> = {}): Bead => ({
+export const bead = (id: string, over: Partial<BeadDetail> = {}): BeadDetail => ({
   id,
   title: `Title of ${id}`,
   status: "open",
@@ -17,14 +17,20 @@ export const bead = (id: string, over: Partial<Bead> = {}): Bead => ({
   dependency_count: 0,
   dependent_count: 0,
   comment_count: 0,
+  description: "",
+  design: "",
+  acceptance_criteria: "",
+  notes: "",
+  comments: [],
   ...over,
 });
 
-export const detail = (id: string, over: Partial<BeadDetail> = {}): BeadDetail => ({ ...bead(id), description: "", design: "", acceptance_criteria: "", notes: "", dependencies: [], ...over });
+// A bead is a detail now: the snapshot carries both.
+export const detail = bead;
 
-export const snapshot = (beads: Bead[], ready: string[] = [], locks: [string, number][] = []): Snapshot => ({ beads, ready: new Set(ready), locks: new Map(locks) });
+export const snapshot = (beads: BeadDetail[], ready: string[] = [], locks: [string, number][] = [], edges: Edge[] = []): Snapshot => ({ beads, edges, ready: new Set(ready), locks: new Map(locks) });
 
-export const modelOf = (beads: Bead[], ready: string[] = []): Model => ({ ...initModel(), snapshot: snapshot(beads, ready) });
+export const modelOf = (beads: BeadDetail[], ready: string[] = []): Model => ({ ...initModel(), snapshot: snapshot(beads, ready) });
 
 // Feeds messages in order and returns the model; the commands are dropped.
 export function steps(m: Model, ...msgs: Msg[]): Model {
@@ -35,4 +41,4 @@ export function steps(m: Model, ...msgs: Msg[]): Model {
 }
 
 // n beads with distinct ids and spread priorities, for the list that must stay smooth.
-export const many = (n: number): Bead[] => Array.from({ length: n }, (_, i) => bead(`big-${i}`, { priority: i % 5, issue_type: ["task", "bug", "feature"][i % 3] ?? "task", updated_at: new Date(Date.UTC(2026, 0, 1) + i * 60_000).toISOString() }));
+export const many = (n: number): BeadDetail[] => Array.from({ length: n }, (_, i) => bead(`big-${i}`, { priority: i % 5, issue_type: ["task", "bug", "feature"][i % 3] ?? "task", updated_at: new Date(Date.UTC(2026, 0, 1) + i * 60_000).toISOString() }));

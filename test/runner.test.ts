@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bd, beadComments, blockedBeads, closeBead, depTree, listBeads, readyIds, reopenBead, run, showBead, statuses, updateStatus } from "../src/runner.ts";
+import { bd, blockedBeads, closeBead, exportBeads, readyIds, reopenBead, run, statuses, updateStatus } from "../src/runner.ts";
 import type { Res } from "../src/types.ts";
 import { exit, fakeHost, fixture, ok } from "./fake-host.ts";
 import type { Reply } from "./fake-host.ts";
@@ -12,11 +12,11 @@ function tag(res: Res<unknown>): string {
 }
 
 test("runs bd in the Viewed repo with a timeout and decodes stdout", async () => {
-  const { host, calls } = fakeHost(() => ok(fixture("list")));
-  const res = await listBeads(host, ROOT);
-  assert.ok(res.ok && res.value.length === 5);
+  const { host, calls } = fakeHost(() => ok(fixture("export", "jsonl")));
+  const res = await exportBeads(host, ROOT);
+  assert.ok(res.ok && res.value.beads.length === 4 && res.value.edges.length === 5);
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], { command: "bd", args: ["list", "--all", "-n", "0", "--brief", "--json"], cwd: ROOT, timeout: 15_000 });
+  assert.deepEqual(calls[0], { command: "bd", args: ["export"], cwd: ROOT, timeout: 15_000 });
 });
 
 test("each read asks bd for its own command", async () => {
@@ -27,20 +27,17 @@ test("each read asks bd for its own command", async () => {
   });
   await readyIds(host, ROOT);
   await blockedBeads(host, ROOT);
-  await showBead(host, ROOT, "x-1"); // "[]" is no bead: the version lookup that follows is not under test
-  await depTree(host, ROOT, "x-1", "up");
-  await beadComments(host, ROOT, "x-1");
   await statuses(host, ROOT);
   assert.deepEqual(
     seen.filter((a) => a !== "--version"),
-    ["ready -n 0 --json", "blocked --json", "show x-1 --json", "dep tree x-1 --direction=up --json", "comments x-1 --json", "statuses --json"],
+    ["ready -n 0 --json", "blocked --json", "statuses --json"],
   );
 });
 
 test("NoDatabase: bd's text is kept", async () => {
   const text = "Error: no beads database found\nHint: run 'bd where' to inspect the resolved workspace, or 'bd init' to create a new database";
   const { host } = fakeHost(() => exit(`${text}\n`));
-  const res = await listBeads(host, ROOT);
+  const res = await exportBeads(host, ROOT);
   assert.deepEqual(res, { ok: false, error: { _tag: "NoDatabase", text } });
 });
 
@@ -50,7 +47,7 @@ const SLOW = new Error("`herdr.exec`: bd took longer than 15 s and was stopped")
 
 test("BdMissing: exec cannot start bd, and bd cannot start without the folder either", async () => {
   const { host, calls, sleeps } = fakeHost(() => NO_BIN);
-  const res = await listBeads(host, ROOT);
+  const res = await exportBeads(host, ROOT);
   assert.deepEqual(res, { ok: false, error: { _tag: "BdMissing", text: NO_BIN.message } });
   assert.deepEqual(
     calls.map((c) => c.cwd),
@@ -61,13 +58,13 @@ test("BdMissing: exec cannot start bd, and bd cannot start without the folder ei
 
 test("BdRejected: the same rejection when bd starts without the folder means the folder is gone", async () => {
   const { host } = fakeHost(({ cwd }) => (cwd === undefined ? ok("bd version 1.3.4 (dev)") : NO_BIN));
-  const res = await listBeads(host, ROOT);
+  const res = await exportBeads(host, ROOT);
   assert.deepEqual(res, { ok: false, error: { _tag: "BdRejected", code: -1, text: NO_BIN.message } });
 });
 
 test("BdTimeout: exec rejects with its timeout text, retried twice", async () => {
   const { host, calls, sleeps } = fakeHost(() => SLOW);
-  const res = await listBeads(host, ROOT);
+  const res = await exportBeads(host, ROOT);
   assert.deepEqual(res, { ok: false, error: { _tag: "BdTimeout", text: SLOW.message } });
   assert.equal(calls.length, 3);
   assert.deepEqual(sleeps, [300, 900]);
@@ -77,7 +74,7 @@ const LOCK = "a maintenance operation is running on this workspace; retry when i
 
 test("BdLocked: the --json form has the text on stdout and empty stderr; 3 calls, then the error", async () => {
   const { host, calls, sleeps } = fakeHost(() => exit("", JSON.stringify({ error: LOCK, schema_version: 1 })));
-  const res = await listBeads(host, ROOT);
+  const res = await exportBeads(host, ROOT);
   assert.deepEqual(res, { ok: false, error: { _tag: "BdLocked", text: LOCK } });
   assert.equal(calls.length, 3);
   assert.deepEqual(sleeps, [300, 900]);
@@ -95,32 +92,21 @@ test("BdLocked: a warning on stderr does not hide the error on stdout", async ()
 });
 
 test("a lock that clears on the second try returns the data after one sleep", async () => {
-  const { host, calls, sleeps } = fakeHost((_c, n): Reply => (n === 1 ? exit(`Error: ${LOCK}`) : ok(fixture("list"))));
-  const res = await listBeads(host, ROOT);
+  const { host, calls, sleeps } = fakeHost((_c, n): Reply => (n === 1 ? exit(`Error: ${LOCK}`) : ok(fixture("export", "jsonl"))));
+  const res = await exportBeads(host, ROOT);
   assert.ok(res.ok);
   assert.equal(calls.length, 2);
   assert.deepEqual(sleeps, [300]);
 });
 
-test("BeadGone: show, with the text on both streams", async () => {
+test("BeadGone: bd's not-found texts, on either stream", async () => {
   const hint = "Issue nope-123 not found\nHint: this ID may have never existed";
   const json = JSON.stringify({ error: "no issues found matching the provided IDs", schema_version: 1 });
   const { host } = fakeHost(() => exit(hint, json));
-  const res = await showBead(host, ROOT, "nope-123");
+  const res = await bd(host, ROOT, ["show", "nope-123", "--json"]);
   assert.deepEqual(res, { ok: false, error: { _tag: "BeadGone", text: `${hint}\nno issues found matching the provided IDs` } });
-  const only = fakeHost(() => exit("", json));
-  assert.equal(tag(await showBead(only.host, ROOT, "nope-123")), "BeadGone");
-});
-
-test("BeadGone: dep tree (both directions) and comments word it differently, on stdout only", async () => {
   const tree = JSON.stringify({ error: 'resolving issue ID nope-123: no issue found matching "nope-123"', schema_version: 1 });
-  const comments = JSON.stringify({ error: 'resolving nope-123: no issue found matching "nope-123"', schema_version: 1 });
-  const a = fakeHost(() => exit("", tree));
-  assert.equal(tag(await depTree(a.host, ROOT, "nope-123", "down")), "BeadGone");
-  assert.equal(tag(await depTree(a.host, ROOT, "nope-123", "up")), "BeadGone");
-  const b = fakeHost(() => exit("", comments));
-  assert.equal(tag(await beadComments(b.host, ROOT, "nope-123")), "BeadGone");
-  assert.equal(a.calls.length + b.calls.length, 3);
+  assert.equal(tag(await bd(fakeHost(() => exit("", tree)).host, ROOT, ["dep", "tree", "nope-123"])), "BeadGone");
 });
 
 test("BdRejected carries the code and the text, and is not retried", async () => {
@@ -133,17 +119,17 @@ test("BdRejected carries the code and the text, and is not retried", async () =>
 
 test("Undecodable carries the bd version, asked for only after the decode fails", async () => {
   const { host, calls } = fakeHost(({ args }) => (args[0] === "--version" ? ok("bd version 1.3.4 (dev)\n") : ok("{}")));
-  const res = await listBeads(host, ROOT);
-  assert.deepEqual(res, { ok: false, error: { _tag: "Undecodable", version: "1.3.4", path: "$", detail: "expected an array" } });
+  const res = await exportBeads(host, ROOT);
+  assert.deepEqual(res, { ok: false, error: { _tag: "Undecodable", version: "1.3.4", path: "$[0].id", detail: "expected a string" } });
   assert.deepEqual(
     calls.map((c) => c.args[0]),
-    ["list", "--version"],
+    ["export", "--version"],
   );
 });
 
 test("Undecodable is not retried, and its version is null when bd cannot say", async () => {
   const { host, sleeps } = fakeHost(({ args }) => (args[0] === "--version" ? exit("boom") : ok("{}")));
-  const res = await listBeads(host, ROOT);
+  const res = await exportBeads(host, ROOT);
   assert.ok(!res.ok && res.error._tag === "Undecodable" && res.error.version === null);
   assert.deepEqual(sleeps, []);
 });
@@ -210,4 +196,53 @@ test("Statuses lists bd's statuses, built-in and custom", async () => {
   const msg = await run(host, ROOT, { _tag: "Statuses" });
   assert.deepEqual(calls[0]?.args, ["statuses", "--json"]);
   assert.ok(msg._tag === "StatusesRead" && msg.res.ok && msg.res.value.map((s) => s.name).join() === "open,review");
+});
+
+// The Load's three reads: what each answers by command.
+const answers =
+  (over: Record<string, Reply> = {}) =>
+  ({ args }: { args: string[] }): Reply =>
+    over[args[0] ?? ""] ?? (args[0] === "export" ? ok(fixture("export", "jsonl")) : args[0] === "ready" ? ok(fixture("ready")) : ok(fixture("blocked")));
+
+test("Load runs bd export, ready and blocked, and no bd list", async () => {
+  const { host, calls } = fakeHost(answers());
+  const msg = await run(host, ROOT, { _tag: "Load" });
+  assert.deepEqual(calls.map((c) => c.args.join(" ")).sort(), ["blocked --json", "export", "ready -n 0 --json"]);
+  assert.ok(msg._tag === "Loaded" && msg.res.ok);
+});
+
+test("Load's Snapshot carries the beads, their edges, the ready ids and the lock counts", async () => {
+  const { host } = fakeHost(answers());
+  const msg = await run(host, ROOT, { _tag: "Load" });
+  assert.ok(msg._tag === "Loaded" && msg.res.ok);
+  const { beads, edges, ready, locks } = msg.res.value;
+  assert.equal(beads.length, 4);
+  assert.deepEqual(edges[2], { from: "x-e1.2", to: "x-e1.1", type: "blocks" });
+  assert.ok(ready.has("raccoon-51n"));
+  assert.equal(locks.get("raccoon-46u.5"), 3);
+});
+
+test("Load reports the error of export first, then ready, then blocked", async () => {
+  const bust = (args: string[]) => ({ [args[0] ?? ""]: exit(`Error: ${args[0]}`) });
+  const first = fakeHost(answers({ ...bust(["export"]), ...bust(["ready"]), ...bust(["blocked"]) }));
+  const a = await run(first.host, ROOT, { _tag: "Load" });
+  assert.ok(a._tag === "Loaded" && !a.res.ok && a.res.error._tag === "BdRejected" && a.res.error.text === "Error: export");
+  const second = fakeHost(answers({ ...bust(["ready"]), ...bust(["blocked"]) }));
+  const b = await run(second.host, ROOT, { _tag: "Load" });
+  assert.ok(b._tag === "Loaded" && !b.res.ok && b.res.error._tag === "BdRejected" && b.res.error.text === "Error: ready");
+  const third = fakeHost(answers(bust(["blocked"])));
+  const c = await run(third.host, ROOT, { _tag: "Load" });
+  assert.ok(c._tag === "Loaded" && !c.res.ok && c.res.error._tag === "BdRejected" && c.res.error.text === "Error: blocked");
+});
+
+test("a bad line in the export is an Undecodable naming the line", async () => {
+  const { host } = fakeHost(answers({ export: ok(`${fixture("export", "jsonl")}nope\n`) }));
+  const msg = await run(host, ROOT, { _tag: "Load" });
+  assert.ok(msg._tag === "Loaded" && !msg.res.ok && msg.res.error._tag === "Undecodable" && msg.res.error.path === "$[4]");
+});
+
+test("WaitLoad sleeps 150 ms and answers Slowed", async () => {
+  const { host, sleeps } = fakeHost(() => ok(""));
+  assert.deepEqual(await run(host, ROOT, { _tag: "WaitLoad", n: 2 }), { _tag: "Slowed", n: 2 });
+  assert.deepEqual(sleeps, [150]);
 });

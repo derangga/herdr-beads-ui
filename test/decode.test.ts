@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeAgents, decodeBlocked, decodeComments, decodeFocus, decodeFont, decodeList, decodePanes, decodeProps, decodeReady, decodeShow, decodeStatuses, decodeTree } from "../src/decode.ts";
+import { decodeAgents, decodeBlocked, decodeExport, decodeFocus, decodeFont, decodePanes, decodeProps, decodeReady, decodeStatuses } from "../src/decode.ts";
 import type { Res } from "../src/types.ts";
 import { fixture } from "./fake-host.ts";
 
@@ -18,41 +18,95 @@ function broken(name: string, change: (json: any) => void): string {
   return JSON.stringify(json);
 }
 
+// The export fixture with one line changed, as bd text.
+function brokenExport(change: (lines: any[]) => void): string {
+  const lines = fixture("export", "jsonl")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l));
+  change(lines);
+  return lines.map((l) => JSON.stringify(l)).join("\n");
+}
+
 const undecodable = (res: Res<unknown>, path: string) => {
   assert.ok(!res.ok);
   assert.deepEqual({ _tag: res.error._tag, path: "path" in res.error ? res.error.path : null, version: "version" in res.error ? res.error.version : null }, { _tag: "Undecodable", path, version: V });
 };
 
-test("list: a closed bead, an epic and an open task", () => {
-  const beads = value(decodeList(fixture("list"), V));
-  assert.equal(beads.length, 5);
-  const closed = beads.find((b) => b.id === "raccoon-e4n.15");
-  assert.equal(closed?.status, "closed");
-  assert.equal(closed?.closed_at, "2026-10-16T11:29:55Z");
-  assert.equal(closed?.parent, "raccoon-e4n");
-  assert.equal(beads.find((b) => b.id === "raccoon-46u")?.issue_type, "epic");
-  const open = beads.find((b) => b.id === "raccoon-46u.5");
-  assert.equal(open?.closed_at, null);
-  assert.equal(open?.dependency_count, 3);
+test("export: beads with the parent taken from the parent-child edge, and every edge", () => {
+  const { beads, edges } = value(decodeExport(fixture("export", "jsonl"), V));
+  assert.deepEqual(
+    beads.map((b) => [b.id, b.parent]),
+    [
+      ["x-e1", null],
+      ["x-e1.1", "x-e1"],
+      ["x-e1.2", "x-e1"],
+      ["x-e1.3", "x-e1"],
+    ],
+  );
+  assert.deepEqual(
+    edges.map((e) => [e.from, e.to, e.type]),
+    [
+      ["x-e1.1", "x-e1", "parent-child"],
+      ["x-e1.2", "x-e1", "parent-child"],
+      ["x-e1.2", "x-e1.1", "blocks"],
+      ["x-e1.2", "x-e1.3", "blocks"],
+      ["x-e1.3", "x-e1", "parent-child"],
+    ],
+  );
 });
 
-test("list: a missing title and a wrong-typed priority", () => {
+test("export: a closed bead, a comment, the long fields and absent optional ones", () => {
+  const { beads } = value(decodeExport(fixture("export", "jsonl"), V));
+  const closed = beads.find((b) => b.id === "x-e1.1");
+  assert.equal(closed?.status, "closed");
+  assert.equal(closed?.closed_at, "2026-10-16T11:29:55Z");
+  assert.equal(closed?.comment_count, 1);
+  assert.deepEqual(closed?.comments, [{ id: "a00db897-5db8-526e-88fe-ae985db7c284", author: "derangga", text: "Done in one export.", created_at: "2026-10-16T11:29:50Z" }]);
+  const open = beads.find((b) => b.id === "x-e1.2");
+  assert.equal(open?.acceptance_criteria, "[ ] Shows at once\n  [x] Walks the history");
+  assert.equal(open?.design, "No bd call.");
+  assert.equal(open?.assignee, null);
+  assert.equal(open?.closed_at, null);
+  assert.deepEqual(open?.comments, []);
+  const bare = beads.find((b) => b.id === "x-e1.3");
+  assert.deepEqual([bare?.description, bare?.design, bare?.acceptance_criteria, bare?.notes, bare?.labels], ["", "", "", "", []]);
+});
+
+test("export: blank lines and records of another _type are skipped", () => {
+  const [a, b] = fixture("export", "jsonl").trim().split("\n");
+  const text = `\n${a}\n\n{"_type":"memory","key":"k"}\n${b}\n`;
+  assert.deepEqual(
+    value(decodeExport(text, V)).beads.map((x) => x.id),
+    ["x-e1", "x-e1.1"],
+  );
+  assert.deepEqual(value(decodeExport("", V)), { beads: [], edges: [] });
+});
+
+test("export: the path names the line of a missing title, a wrong-typed edge, a bad comment and a non-JSON line", () => {
   undecodable(
-    decodeList(
-      broken("list", (j) => delete j[2].title),
+    decodeExport(
+      brokenExport((l) => delete l[3].title),
       V,
     ),
-    "$[2].title",
+    "$[3].title",
   );
   undecodable(
-    decodeList(
-      broken("list", (j) => (j[0].priority = "high")),
+    decodeExport(
+      brokenExport((l) => (l[2].dependencies[1].type = 7)),
       V,
     ),
-    "$[0].priority",
+    "$[2].dependencies[1].type",
   );
-  undecodable(decodeList("not json", V), "$");
-  undecodable(decodeList("{}", V), "$");
+  undecodable(
+    decodeExport(
+      brokenExport((l) => delete l[1].comments[0].text),
+      V,
+    ),
+    "$[1].comments[0].text",
+  );
+  undecodable(decodeExport(`${fixture("export", "jsonl")}nope\n`, V), "$[4]");
+  undecodable(decodeExport("[1]", V), "$[0]");
 });
 
 test("ready: ids only", () => {
@@ -80,74 +134,6 @@ test("blocked: the lock count and the blockers", () => {
   );
 });
 
-test("show: an open bead, an epic and a closed bead", () => {
-  const open = value(decodeShow(fixture("show-open"), V));
-  assert.equal(open.id, "raccoon-46u.5");
-  assert.ok(open.acceptance_criteria.startsWith("[ ] With MockListening"));
-  assert.equal(open.dependencies.length, 4);
-  assert.equal(open.dependencies[0]?.dependency_type, "blocks");
-  assert.equal(value(decodeShow(fixture("show-epic"), V)).issue_type, "epic");
-  const closed = value(decodeShow(fixture("show-closed"), V));
-  assert.equal(closed.status, "closed");
-  assert.equal(closed.comment_count, 1);
-  assert.equal(closed.notes, "");
-});
-
-test("show: a missing status, a wrong-typed dependency, an empty array", () => {
-  undecodable(
-    decodeShow(
-      broken("show-open", (j) => delete j[0].status),
-      V,
-    ),
-    "$[0].status",
-  );
-  undecodable(
-    decodeShow(
-      broken("show-open", (j) => (j[0].dependencies[1].dependency_type = 7)),
-      V,
-    ),
-    "$[0].dependencies[1].dependency_type",
-  );
-  undecodable(decodeShow("[]", V), "$[0]");
-});
-
-test("dep tree: the walk order, depth and edges", () => {
-  const nodes = value(decodeTree(fixture("tree-down"), V));
-  assert.deepEqual(
-    nodes.map((n) => [n.id, n.depth, n.parent_id, n.edge_from_parent]),
-    [
-      ["raccoon-46u.5", 0, "", null],
-      ["raccoon-46u.3", 1, "raccoon-46u.5", "blocks"],
-      ["raccoon-46u", 2, "raccoon-46u.3", "parent-child"],
-      ["raccoon-ckc", 3, "raccoon-46u", "blocks"],
-      ["raccoon-46u.2", 2, "raccoon-46u.3", "blocks"],
-      ["raccoon-46u.1", 1, "raccoon-46u.5", "blocks"],
-      ["raccoon-46u.4", 1, "raccoon-46u.5", "blocks"],
-    ],
-  );
-  assert.equal(value(decodeTree(fixture("tree-up"), V)).length, 4);
-  undecodable(
-    decodeTree(
-      broken("tree-down", (j) => delete j[3].depth),
-      V,
-    ),
-    "$[3].depth",
-  );
-});
-
-test("comments", () => {
-  const [c] = value(decodeComments(fixture("comments"), V));
-  assert.equal(c?.author, "derangga");
-  assert.equal(c?.created_at, "2026-08-31T15:45:39Z");
-  undecodable(
-    decodeComments(
-      broken("comments", (j) => delete j[0].text),
-      V,
-    ),
-    "$[0].text",
-  );
-});
-
 test("statuses", () => {
   const all = value(decodeStatuses(fixture("statuses"), V));
   assert.deepEqual(
@@ -172,7 +158,7 @@ test("statuses", () => {
 });
 
 test("a decode failure without a known version carries null", () => {
-  const res = decodeList("{}", null);
+  const res = decodeExport("nope", null);
   assert.ok(!res.ok && res.error._tag === "Undecodable" && res.error.version === null);
 });
 

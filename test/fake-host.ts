@@ -10,9 +10,11 @@ export type Call = { command: string; args: string[]; cwd?: string; timeout?: nu
 export const ok = (stdout: string): ExecResult => ({ code: 0, stdout, stderr: "" });
 export const exit = (stderr: string, stdout = ""): ExecResult => ({ code: 1, stdout, stderr });
 
-export function fakeHost(exec: (call: Call, n: number) => Reply): { host: Host; calls: Call[]; sleeps: number[] } {
+// `over` replaces Host members; `events` lists, in order, every sleep, run and clipboard write the defaults saw.
+export function fakeHost(exec: (call: Call, n: number) => Reply, over: Partial<Host> = {}): { host: Host; calls: Call[]; sleeps: number[]; events: string[] } {
   const calls: Call[] = [];
   const sleeps: number[] = [];
+  const events: string[] = [];
   const host: Host = {
     async exec(command, args, options) {
       const call = { command, args, ...options };
@@ -25,9 +27,13 @@ export function fakeHost(exec: (call: Call, n: number) => Reply): { host: Host; 
     },
     sleep(ms) {
       sleeps.push(ms);
+      events.push(`sleep ${ms}`);
       return Promise.resolve();
     },
-    run: () => null,
+    run(name, args) {
+      events.push(`run ${name} ${JSON.stringify(args ?? {})}`);
+      return null;
+    },
     focused: () => null,
     panes: () => [],
     agents: () => [],
@@ -37,7 +43,10 @@ export function fakeHost(exec: (call: Call, n: number) => Reply): { host: Host; 
     nextCommand: () => new Promise<string>(() => {}),
     theme: () => ({}),
     readClipboard: () => undefined,
-    writeClipboard: () => {},
+    writeClipboard: (text) => {
+      events.push(`clipboard ${text}`);
+    },
+    ...over,
   };
-  return { host, calls, sleeps };
+  return { host, calls, sleeps, events };
 }

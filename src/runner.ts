@@ -1,6 +1,7 @@
 // Runs bd in the Viewed repo and returns a value: the decoded data or a tagged BdError. Nothing here throws.
-import { decodeBlocked, decodeComments, decodeList, decodeReady, decodeShow, decodeStatuses, decodeTree } from "./decode.ts";
+import { decodeAgents, decodeBlocked, decodeComments, decodeFocus, decodeList, decodePanes, decodeReady, decodeShow, decodeStatuses, decodeTree } from "./decode.ts";
 import type { ExecResult, Host } from "./host.ts";
+import { pickTarget } from "./rows.ts";
 import type { BdError, Cmd, Direction, Msg, Res, Timer } from "./types.ts";
 
 const BD_TIMEOUT_MS = 15_000;
@@ -9,6 +10,13 @@ const RETRY_DELAYS_MS = [300, 900];
 // A bead must stay shown this long before bd is asked about it, so holding j runs bd only for the bead it stops on.
 // A detail still empty after the second shows "Loading", so a fast bd never flashes it. Both count from the selection.
 export const WAIT_MS: Record<Timer, number> = { fetch: 120, loading: 150 };
+// How long "Copied" and "Sent to <agent>" stay on the button.
+export const FADE_MS = 1200;
+// pane.focus lands about 100 ms after run() returns; this is the poll and its limit.
+const FOCUS_POLL_MS = 50;
+const FOCUS_POLLS = 30;
+// terminal.paste reads the clipboard some time after run() returns, so the old text waits at least this long (design/herdr-app-facts.md).
+export const PASTE_MS = 300;
 
 const fail = (error: BdError): Res<never> => ({ ok: false, error });
 
@@ -126,6 +134,40 @@ async function write(host: Host, root: string, { id, from, to, reason }: Extract
   return !reopened.ok || to === "open" ? done(reopened, false) : done(await updateStatus(host, root, id, to), true);
 }
 
+// Types `Work on bead <id>: <title>` into the target agent without Enter. The text rides the clipboard, which is the user's, so
+// the old text is kept and written back. An image on the clipboard cannot be read, so it is not restored.
+async function send(host: Host, { id, title, opener }: Extract<Cmd, { _tag: "Send" }>): Promise<Msg> {
+  const target = pickTarget(opener, decodePanes(host.panes()), decodeAgents(host.agents()));
+  if (target === null) {
+    return { _tag: "SendFailed", error: { _tag: "NoTarget" } };
+  }
+  const kept = host.readClipboard();
+  const restore = (): void => {
+    if (kept !== undefined) {
+      host.writeClipboard(kept);
+    }
+  };
+  try {
+    host.writeClipboard(`Work on bead ${id}: ${title}`);
+    host.run("pane.focus", { terminal: target.terminal });
+    // terminal.paste goes to whatever has the keyboard, so nothing is pasted until the target is seen to have it.
+    for (let i = 0; decodeFocus(host.focused())?.terminal !== target.terminal; i++) {
+      if (i === FOCUS_POLLS) {
+        restore();
+        return { _tag: "SendFailed", error: { _tag: "TargetGone" } };
+      }
+      await host.sleep(FOCUS_POLL_MS);
+    }
+    host.run("terminal.paste");
+    await host.sleep(PASTE_MS);
+    restore();
+    return { _tag: "Sent", agent: target.name };
+  } catch (e) {
+    restore();
+    return { _tag: "SendFailed", error: { _tag: "SendRejected", text: e instanceof Error ? e.message : String(e) } };
+  }
+}
+
 // Runs a Cmd and answers with a Msg. The three list reads go at once; the first error in list, ready, blocked order wins.
 export async function run(host: Host, root: string, cmd: Cmd): Promise<Msg> {
   switch (cmd._tag) {
@@ -160,5 +202,14 @@ export async function run(host: Host, root: string, cmd: Cmd): Promise<Msg> {
       return { _tag: "StatusesRead", res: await statuses(host, root) };
     case "Write":
       return write(host, root, cmd);
+    case "Copy":
+      host.writeClipboard(cmd.id);
+      await host.sleep(FADE_MS);
+      return { _tag: "Faded", what: "copied", n: cmd.n };
+    case "Send":
+      return send(host, cmd);
+    case "Fade":
+      await host.sleep(FADE_MS);
+      return { _tag: "Faded", what: cmd.what, n: cmd.n };
   }
 }

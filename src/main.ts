@@ -3,12 +3,13 @@
 import { View, div } from "gpui-kit";
 import type { AsyncContext, Context, Element, FocusHandle } from "gpui-kit";
 import { InputState, VirtualListScrollHandle } from "gpui-base";
-import { decodeFocus, decodeFont, decodeProps } from "./decode.ts";
+import { decodeAgents, decodeFocus, decodeFont, decodePanes, decodeProps } from "./decode.ts";
 import { realHost } from "./host.ts";
 import type { Host } from "./host.ts";
-import { visible } from "./rows.ts";
+import { openerOf, pickTarget, visible } from "./rows.ts";
 import { Store } from "./store.ts";
 import type { Bead, Model, Msg } from "./types.ts";
+import { initModel } from "./update.ts";
 import { draw } from "./view.ts";
 
 // The Viewed repo: the props say it when something opened the Viewer for a folder, else the focused terminal's folder is the Opener's.
@@ -53,6 +54,7 @@ export default class BeadsView extends View {
         this.sync(before, model, msg);
         this.cx.notify();
       },
+      initModel(openerOf(decodeProps(this.host.props()).opener, decodeFocus(this.host.focused()), decodePanes(this.host.panes()))),
     );
     this.mono = decodeFont(this.host.settings());
     this.nav = cx.focus_handle();
@@ -126,7 +128,9 @@ export default class BeadsView extends View {
     if (this.root === null) {
       return div().size_full().p(14).bg(t.background).text_color(t.muted).child("Open from a terminal");
     }
-    const ui = { nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start: number, end: number) => (this.seen = [start, end]) };
+    // Looked up on every draw, since the agents come and go without the Viewer being told.
+    const target = pickTarget(this.store.model.opener, decodePanes(this.host.panes()), decodeAgents(this.host.agents()));
+    const ui = { target, nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start: number, end: number) => (this.seen = [start, end]) };
     return draw(this.store.model, this.rows(this.store.model), t, (msg) => this.dispatch(msg), ui, Date.now());
   }
 

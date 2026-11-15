@@ -1,5 +1,5 @@
 // Filtering, search and sorting of the loaded beads. Pure: bd is never run here.
-import type { Bead, BeadDetail, Filters, Model, Msg, Sort, SortKey, TreeNode, TreeRow } from "./types.ts";
+import type { AgentRef, Bead, BeadDetail, Filters, Focus, Model, Msg, Opener, PaneRef, SendError, Sort, SortKey, Target, TreeNode, TreeRow } from "./types.ts";
 
 export const NOT_CLOSED = "not closed";
 export const ALL = "all";
@@ -135,6 +135,32 @@ export function shownBead(m: Model): BeadDetail | null {
   return d === null || status === undefined ? d : { ...d, status };
 }
 
+// Where Send to agent types: the Opener if an agent runs there, else the agent of the Viewer's tab that changed last.
+export function pickTarget(opener: Opener, panes: PaneRef[], agents: AgentRef[]): Target | null {
+  const there = panes.find((p) => p.terminal !== null && p.terminal === opener.terminal && p.status !== null);
+  if (there?.terminal != null) {
+    return { terminal: there.terminal, name: there.name };
+  }
+  const inTab = agents.filter((a) => a.tab === opener.tab).sort((a, b) => b.seq - a.seq);
+  for (const a of inTab) {
+    const terminal = panes.find((p) => p.pane === a.pane)?.terminal;
+    if (terminal !== null && terminal !== undefined) {
+      return { terminal, name: a.name };
+    }
+  }
+  return null;
+}
+
+// The terminal focused when the Viewer opened, and its tab, which is the Viewer's own. The Opener's pane is still listed at init; when it
+// is not (a mod pane, a prop naming another terminal), the focused tab stands in.
+export function openerOf(prop: string | null, focus: Focus | null, panes: PaneRef[]): Opener {
+  const terminal = prop ?? focus?.terminal ?? null;
+  return { terminal, tab: panes.find((p) => p.terminal === terminal)?.tab ?? focus?.tab ?? null };
+}
+
+// What the Send button says for a moment after it ran.
+export const sendText = (e: SendError): string => (e._tag === "TargetGone" ? "Agent is gone" : e._tag === "NoTarget" ? "No agent in this tab" : "Send failed");
+
 // The picker's choices: bd's statuses, and the bead's own when it holds one bd does not list.
 export const pickOptions = (m: Model, current: string): string[] => (m.statuses.includes(current) ? m.statuses : [...m.statuses, current]);
 
@@ -198,6 +224,8 @@ export function keyFor(m: Model, keystroke: string): Msg | null {
       return { _tag: "Refresh" };
     case "s":
       return { _tag: "ToggleMenu", menu: "pick" };
+    case "y":
+      return { _tag: "Copy" };
     case "[":
       return { _tag: "Walk", delta: -1 };
     case "]":

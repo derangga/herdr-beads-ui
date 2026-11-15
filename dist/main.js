@@ -136,11 +136,23 @@ function decodeFocus(v) {
     return null;
   }
   const o = v;
-  return { cwd: typeof o.cwd === "string" ? o.cwd : null, terminal: typeof o.terminal === "string" ? o.terminal : null };
+  return { cwd: typeof o.cwd === "string" ? o.cwd : null, terminal: typeof o.terminal === "string" ? o.terminal : null, tab: typeof o.tab === "string" ? o.tab : null };
 }
 function decodeProps(v) {
-  const root = typeof v === "object" && v !== null ? v.root : void 0;
-  return { root: typeof root === "string" && root !== "" ? root : null };
+  const o = typeof v === "object" && v !== null ? v : {};
+  const text2 = (x) => typeof x === "string" && x !== "" ? x : null;
+  return { root: text2(o.root), opener: text2(o.opener) };
+}
+var records = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "object" && x !== null) : [];
+var name = (o) => {
+  const program = typeof o.program === "object" && o.program !== null ? o.program.name : void 0;
+  return typeof program === "string" && program !== "" ? program : typeof o.title === "string" ? o.title : "";
+};
+function decodePanes(v) {
+  return records(v).flatMap((o) => typeof o.pane === "string" && typeof o.tab === "string" ? [{ pane: o.pane, terminal: typeof o.terminal === "string" ? o.terminal : null, tab: o.tab, status: typeof o.status === "string" ? o.status : null, name: name(o) }] : []);
+}
+function decodeAgents(v) {
+  return records(v).flatMap((o) => typeof o.pane === "string" && typeof o.tab === "string" && typeof o.seq === "number" ? [{ pane: o.pane, tab: o.tab, seq: o.seq, name: name(o) }] : []);
 }
 var FALLBACK_MONO = "Menlo";
 function decodeFont(v) {
@@ -153,7 +165,7 @@ import { agents, exec, focused, nextCommand, panes, props, run, settings, spaces
 var realHost = (cx) => ({
   exec: (command, args, options) => exec(command, args, options),
   sleep: (ms) => cx.sleep(ms),
-  run: (name, args) => run(name, args),
+  run: (name2, args) => run(name2, args),
   focused: () => focused(),
   panes: () => panes(),
   agents: () => agents(),
@@ -264,6 +276,25 @@ function shownBead(m) {
   const status2 = m.snapshot?.beads.find((b) => b.id === id)?.status;
   return d === null || status2 === void 0 ? d : { ...d, status: status2 };
 }
+function pickTarget(opener, panes2, agents2) {
+  const there = panes2.find((p) => p.terminal !== null && p.terminal === opener.terminal && p.status !== null);
+  if (there?.terminal != null) {
+    return { terminal: there.terminal, name: there.name };
+  }
+  const inTab = agents2.filter((a) => a.tab === opener.tab).sort((a, b) => b.seq - a.seq);
+  for (const a of inTab) {
+    const terminal = panes2.find((p) => p.pane === a.pane)?.terminal;
+    if (terminal !== null && terminal !== void 0) {
+      return { terminal, name: a.name };
+    }
+  }
+  return null;
+}
+function openerOf(prop, focus, panes2) {
+  const terminal = prop ?? focus?.terminal ?? null;
+  return { terminal, tab: panes2.find((p) => p.terminal === terminal)?.tab ?? focus?.tab ?? null };
+}
+var sendText = (e) => e._tag === "TargetGone" ? "Agent is gone" : e._tag === "NoTarget" ? "No agent in this tab" : "Send failed";
 var pickOptions = (m, current) => m.statuses.includes(current) ? m.statuses : [...m.statuses, current];
 function typeOptions(m) {
   return [ALL, ...[...new Set((m.snapshot?.beads ?? []).map((b) => b.issue_type))].sort()];
@@ -313,6 +344,8 @@ function keyFor(m, keystroke) {
       return { _tag: "Refresh" };
     case "s":
       return { _tag: "ToggleMenu", menu: "pick" };
+    case "y":
+      return { _tag: "Copy" };
     case "[":
       return { _tag: "Walk", delta: -1 };
     case "]":
@@ -330,6 +363,10 @@ function keyFor(m, keystroke) {
 var BD_TIMEOUT_MS = 15e3;
 var RETRY_DELAYS_MS = [300, 900];
 var WAIT_MS = { fetch: 120, loading: 150 };
+var FADE_MS = 1200;
+var FOCUS_POLL_MS = 50;
+var FOCUS_POLLS = 30;
+var PASTE_MS = 300;
 var fail = (error) => ({ ok: false, error });
 function errorText({ stdout, stderr }) {
   let out = stdout.trim();
@@ -422,6 +459,36 @@ async function write(host, root, { id, from, to, reason }) {
   const reopened = await reopenBead(host, root, id);
   return !reopened.ok || to === "open" ? done(reopened, false) : done(await updateStatus(host, root, id, to), true);
 }
+async function send(host, { id, title, opener }) {
+  const target = pickTarget(opener, decodePanes(host.panes()), decodeAgents(host.agents()));
+  if (target === null) {
+    return { _tag: "SendFailed", error: { _tag: "NoTarget" } };
+  }
+  const kept = host.readClipboard();
+  const restore = () => {
+    if (kept !== void 0) {
+      host.writeClipboard(kept);
+    }
+  };
+  try {
+    host.writeClipboard(`Work on bead ${id}: ${title}`);
+    host.run("pane.focus", { terminal: target.terminal });
+    for (let i = 0; decodeFocus(host.focused())?.terminal !== target.terminal; i++) {
+      if (i === FOCUS_POLLS) {
+        restore();
+        return { _tag: "SendFailed", error: { _tag: "TargetGone" } };
+      }
+      await host.sleep(FOCUS_POLL_MS);
+    }
+    host.run("terminal.paste");
+    await host.sleep(PASTE_MS);
+    restore();
+    return { _tag: "Sent", agent: target.name };
+  } catch (e) {
+    restore();
+    return { _tag: "SendFailed", error: { _tag: "SendRejected", text: e instanceof Error ? e.message : String(e) } };
+  }
+}
 async function run2(host, root, cmd) {
   switch (cmd._tag) {
     case "Load": {
@@ -455,11 +522,20 @@ async function run2(host, root, cmd) {
       return { _tag: "StatusesRead", res: await statuses(host, root) };
     case "Write":
       return write(host, root, cmd);
+    case "Copy":
+      host.writeClipboard(cmd.id);
+      await host.sleep(FADE_MS);
+      return { _tag: "Faded", what: "copied", n: cmd.n };
+    case "Send":
+      return send(host, cmd);
+    case "Fade":
+      await host.sleep(FADE_MS);
+      return { _tag: "Faded", what: cmd.what, n: cmd.n };
   }
 }
 
 // src/update.ts
-var initModel = () => ({
+var initModel = (opener = { terminal: null, tab: null }) => ({
   snapshot: null,
   loading: false,
   error: null,
@@ -479,7 +555,12 @@ var initModel = () => ({
   statuses: BUILT_IN_STATUSES,
   writing: /* @__PURE__ */ new Map(),
   writeError: null,
-  reload: false
+  reload: false,
+  opener,
+  flash: 0,
+  copied: null,
+  sending: false,
+  sent: null
 });
 function update(m, msg) {
   const [next, cmds] = step(m, msg);
@@ -639,6 +720,24 @@ function step(m, msg) {
       const writeError = msg.error === null ? m.writeError : { id: msg.id, error: msg.error, second: msg.to };
       return m.loading ? [{ ...m, writing, writeError, reload: true }, []] : step({ ...m, writing, writeError }, { _tag: "Refresh" });
     }
+    case "Copy": {
+      const b = shownBead(m);
+      if (b === null || m.help || m.sending) {
+        return [m, []];
+      }
+      const n = m.flash + 1;
+      return [{ ...m, flash: n, copied: { n, id: b.id } }, [{ _tag: "Copy", id: b.id, n }]];
+    }
+    case "Send": {
+      const b = shownBead(m);
+      return b === null || m.help || m.sending ? [m, []] : [{ ...m, sending: true }, [{ _tag: "Send", id: b.id, title: b.title, opener: m.opener }]];
+    }
+    case "Sent":
+      return flash({ ...m, sending: false }, `Sent to ${msg.agent}`);
+    case "SendFailed":
+      return flash({ ...m, sending: false }, sendText(msg.error));
+    case "Faded":
+      return [msg.what === "copied" ? m.copied?.n === msg.n ? { ...m, copied: null } : m : m.sent?.n === msg.n ? { ...m, sent: null } : m, []];
     case "Retry": {
       const id = shownId(m);
       const d = id === null ? void 0 : m.details.get(id);
@@ -651,6 +750,10 @@ function step(m, msg) {
       return [{ ...m, gen, details: new Map(m.details).set(id, again) }, msg.part === "show" ? [fetch(id, "show", gen), wait(id, gen, "loading")] : [fetch(id, msg.part, gen)]];
     }
   }
+}
+function flash(m, text2) {
+  const n = m.flash + 1;
+  return [{ ...m, flash: n, sent: { n, text: text2 } }, [{ _tag: "Fade", what: "sent", n }]];
 }
 function write2(m, id, from, to, reason) {
   return [{ ...m, menu: null, writeError: null, writing: new Map(m.writing).set(id, "running") }, [{ _tag: "Write", id, from, to, reason }]];
@@ -676,13 +779,14 @@ function escape(m) {
 
 // src/store.ts
 var Store = class {
-  model = initModel();
+  model;
   closed = false;
   host;
   root;
   spawn;
   changed;
-  constructor(host, root, spawn, changed) {
+  constructor(host, root, spawn, changed, model = initModel()) {
+    this.model = model;
     this.host = host;
     this.root = root;
     this.spawn = spawn;
@@ -713,7 +817,7 @@ var Store = class {
 // src/view.ts
 import { div, svg, uniform_list } from "gpui-kit";
 import { h_flex, Input, Popup, Scrollbar, TextView, v_flex } from "gpui-base";
-var icon = (name) => `mods/beads/icons/${name}.svg`;
+var icon = (name2) => `mods/beads/icons/${name2}.svg`;
 var pick2 = (t, ...keys) => {
   const found = keys.find((k) => t[k] !== void 0);
   return t[found ?? "muted"] ?? t.foreground;
@@ -743,12 +847,12 @@ function button(id, label, on, t, click, chevron = false) {
     click();
   }).child(label).when(chevron, (e) => e.child(svg(icon("chevron-down")).size(12).flex_none()));
 }
-function iconButton(id, name, tip, t, click, spin = false) {
+function iconButton(id, name2, tip, t, click, spin = false) {
   return div().id(id).w(26).h(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(t.muted).tooltip(tip).accessibility_label(tip).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
     cx.stop_propagation();
     click();
   }).child(
-    svg(icon(name)).size(14).flex_none().when(spin, (e) => e.spin(900))
+    svg(icon(name2)).size(14).flex_none().when(spin, (e) => e.spin(900))
   );
 }
 function walkButton(id, glyph, tip, on, t, click) {
@@ -769,12 +873,12 @@ var option = (id, label, on, t, click) => h_flex().id(id).h(26).px(10).gap(8).it
   cx.stop_propagation();
   click();
 }).child(label);
-function picker(m, name, label, on, t, dispatch) {
-  const options = name === "status" ? statusOptions(m).map((s) => ({ label: s, on: m.filters.status === s, msg: { _tag: "SetStatus", status: s } })) : name === "type" ? typeOptions(m).map((s) => ({ label: s, on: m.filters.type === s, msg: { _tag: "SetType", type: s } })) : SORT_KEYS.map((k) => ({ label: SORT_LABEL(k), on: m.sort.key === k, msg: { _tag: "SortBy", key: k } }));
+function picker(m, name2, label, on, t, dispatch) {
+  const options = name2 === "status" ? statusOptions(m).map((s) => ({ label: s, on: m.filters.status === s, msg: { _tag: "SetStatus", status: s } })) : name2 === "type" ? typeOptions(m).map((s) => ({ label: s, on: m.filters.type === s, msg: { _tag: "SetType", type: s } })) : SORT_KEYS.map((k) => ({ label: SORT_LABEL(k), on: m.sort.key === k, msg: { _tag: "SortBy", key: k } }));
   return Popup.new(
-    `menu-${name}`,
-    button(name, label, on || m.menu === name, t, () => dispatch({ _tag: "ToggleMenu", menu: name }), true)
-  ).anchor("bottom_left").flex_none().when(m.menu === name, (e) => e.content(panel(t).children(options.map((o) => option(`option-${name}-${o.label}`, o.label, o.on, t, () => dispatch(o.msg))))));
+    `menu-${name2}`,
+    button(name2, label, on || m.menu === name2, t, () => dispatch({ _tag: "ToggleMenu", menu: name2 }), true)
+  ).anchor("bottom_left").flex_none().when(m.menu === name2, (e) => e.content(panel(t).children(options.map((o) => option(`option-${name2}-${o.label}`, o.label, o.on, t, () => dispatch(o.msg))))));
 }
 function filters(m, t, dispatch, narrow) {
   const f = m.filters;
@@ -846,6 +950,7 @@ var KEYS = [
   ["Tab", "Switch focus between list and detail (wide)"],
   ["[ ]", "Back and forward in the history"],
   ["s", "Change the status of the shown bead"],
+  ["y", "Copy the shown bead's id"],
   ["/", "Search"],
   ["Ctrl+R", "Refresh"],
   ["?", "Show or hide these keys"]
@@ -912,9 +1017,38 @@ function statusPill(b, m, t, dispatch, ui) {
     )
   );
 }
+var FADE = { duration: 120, easing: "ease-out" };
+function crossfade(a, b, showB, colorB) {
+  const layer = (text2, on, color) => {
+    const e = div().absolute().inset_0().flex().items_center().justify_center().whitespace_nowrap().opacity(on ? 1 : 0).transition("opacity", FADE);
+    return (color === void 0 ? e : e.text_color(color)).child(text2);
+  };
+  return div().relative().flex_none().child(
+    div().opacity(0).whitespace_nowrap().child(b.length > a.length ? b : a)
+  ).child(layer(a, !showB)).child(layer(b, showB, colorB));
+}
+function copyButton(b, m, t, dispatch) {
+  const copied = m.copied?.id === b.id;
+  return div().id("copy-id").px(3).flex_none().rounded(4).text_color(t.muted).tooltip(copied ? "Copied" : "Copy id (y)").accessibility_label("Copy id").cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
+    cx.stop_propagation();
+    dispatch({ _tag: "Copy" });
+  }).child(crossfade("\u29C9", "\u2713 Copied", copied, pick2(t, "green", "ansi2")));
+}
+function sendButton(m, t, dispatch, ui) {
+  const on = ui.target !== null;
+  return h_flex().id("send-to-agent").h(26).px(8).flex_none().items_center().rounded(6).border_1().border_color(t.border).text_size(12).text_color(on ? t.foreground : t.muted).opacity(on ? 1 : 0.5).tooltip(ui.target === null ? "No agent in this tab" : `Type the prompt into ${ui.target.name}, without Enter`).accessibility_label("Send to agent").when(
+    on,
+    (e) => e.cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
+      cx.stop_propagation();
+      dispatch({ _tag: "Send" });
+    })
+  ).child(crossfade("Send to agent", m.sent?.text ?? "", m.sent !== null));
+}
 function metaRow(b, m, t, dispatch, ui, now) {
   const ago = age(b.created_at, now);
-  return h_flex().flex_wrap().gap_x(10).gap_y(4).items_center().text_size(12).child(div().font_family(ui.mono).text_size(12).text_color(t.muted).child(b.id)).child(statusPill(b, m, t, dispatch, ui)).child(div().text_size(11).font_semibold().text_color(priorityColor(b.priority, t)).child(`P${b.priority}`)).when(b.assignee !== null, (e) => e.child(div().text_color(t.muted).child(`@${b.assignee}`))).child(
+  return h_flex().flex_wrap().gap_x(10).gap_y(4).items_center().text_size(12).child(
+    h_flex().gap(2).items_center().flex_none().child(div().font_family(ui.mono).text_size(12).text_color(t.muted).child(b.id)).child(copyButton(b, m, t, dispatch))
+  ).child(statusPill(b, m, t, dispatch, ui)).child(div().text_size(11).font_semibold().text_color(priorityColor(b.priority, t)).child(`P${b.priority}`)).when(b.assignee !== null, (e) => e.child(div().text_color(t.muted).child(`@${b.assignee}`))).child(
     div().id("age").text_color(t.muted).tooltip(`Created ${fullDate(b.created_at)}`).child(ago === "now" ? ago : `${ago} ago`)
   );
 }
@@ -929,13 +1063,13 @@ function beadBody(d, e, m, hidden, t, dispatch, ui, now) {
     ...hidden ? [div().flex_none().text_size(12).text_color(t.muted).child("Hidden by the current filters")] : [],
     metaRow(d, m, t, dispatch, ui, now),
     ...m.writeError?.id === d.id ? [div().flex_none().text_size(12).text_color(red(t)).child(writeText(m.writeError))] : [],
-    ...d.labels.length === 0 ? [] : [
-      h_flex().flex_wrap().gap(4).flex_none().children(
+    h_flex().gap(8).items_start().flex_none().child(
+      h_flex().flex_1().min_w(0).flex_wrap().gap(4).children(
         d.labels.map(
           (l) => div().px(6).py(1).rounded(4).bg(pick2(t, "surface0", "raised")).text_size(11).text_color(t.muted).child(l)
         )
       )
-    ],
+    ).child(sendButton(m, t, dispatch, ui)),
     ...textSections(d).map(([label, text2]) => section(label, t, markdown(`md-${d.id}-${label}`, text2))),
     ...tree("Blocked by", "down", e.down, "Nothing blocks this bead.", t, dispatch, ui.mono),
     ...tree("Blocks", "up", e.up, "This bead blocks nothing.", t, dispatch, ui.mono),
@@ -1067,7 +1201,8 @@ var BeadsView = class extends View {
       (before, model, msg) => {
         this.sync(before, model, msg);
         this.cx.notify();
-      }
+      },
+      initModel(openerOf(decodeProps(this.host.props()).opener, decodeFocus(this.host.focused()), decodePanes(this.host.panes())))
     );
     this.mono = decodeFont(this.host.settings());
     this.nav = cx.focus_handle();
@@ -1130,7 +1265,8 @@ var BeadsView = class extends View {
     if (this.root === null) {
       return div2().size_full().p(14).bg(t.background).text_color(t.muted).child("Open from a terminal");
     }
-    const ui = { nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start, end) => this.seen = [start, end] };
+    const target = pickTarget(this.store.model.opener, decodePanes(this.host.panes()), decodeAgents(this.host.agents()));
+    const ui = { target, nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start, end) => this.seen = [start, end] };
     return draw(this.store.model, this.rows(this.store.model), t, (msg) => this.dispatch(msg), ui, Date.now());
   }
   // Bounded: set the flag and let the replies in flight be dropped.

@@ -6,14 +6,15 @@ import type { Model, Msg } from "./types.ts";
 import { initModel, update } from "./update.ts";
 
 export class Store {
-  model: Model = initModel();
+  model: Model;
   closed = false;
   host: Host;
   root: string | null;
   spawn: (job: () => Promise<void>) => void;
   changed: (before: Model, after: Model, msg: Msg) => void;
 
-  constructor(host: Host, root: string | null, spawn: (job: () => Promise<void>) => void, changed: (before: Model, after: Model, msg: Msg) => void) {
+  constructor(host: Host, root: string | null, spawn: (job: () => Promise<void>) => void, changed: (before: Model, after: Model, msg: Msg) => void, model: Model = initModel()) {
+    this.model = model;
     this.host = host;
     this.root = root;
     this.spawn = spawn;

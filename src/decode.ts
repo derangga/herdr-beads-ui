@@ -1,6 +1,6 @@
 // The boundary for bd's JSON: checked by hand, once. A missing or wrong-typed field is Undecodable with the
 // path of the field and the bd version, so a bd that changed its output is named instead of crashing a view.
-import type { Bead, BeadDetail, BeadLink, Blocked, BdError, Comment, Focus, Res, StatusInfo, TreeNode } from "./types.ts";
+import type { AgentRef, Bead, BeadDetail, BeadLink, Blocked, BdError, Comment, Focus, PaneRef, Res, StatusInfo, TreeNode } from "./types.ts";
 
 type Obj = Record<string, unknown>;
 
@@ -163,13 +163,29 @@ export function decodeFocus(v: unknown): Focus | null {
     return null;
   }
   const o = v as Obj;
-  return { cwd: typeof o.cwd === "string" ? o.cwd : null, terminal: typeof o.terminal === "string" ? o.terminal : null };
+  return { cwd: typeof o.cwd === "string" ? o.cwd : null, terminal: typeof o.terminal === "string" ? o.terminal : null, tab: typeof o.tab === "string" ? o.tab : null };
 }
 
-// The one prop the viewer reads: the folder it was opened for.
-export function decodeProps(v: unknown): { root: string | null } {
-  const root = typeof v === "object" && v !== null ? (v as Obj).root : undefined;
-  return { root: typeof root === "string" && root !== "" ? root : null };
+// The props the viewer reads: the folder it was opened for, and the terminal it was opened from.
+export function decodeProps(v: unknown): { root: string | null; opener: string | null } {
+  const o = typeof v === "object" && v !== null ? (v as Obj) : {};
+  const text = (x: unknown): string | null => (typeof x === "string" && x !== "" ? x : null);
+  return { root: text(o.root), opener: text(o.opener) };
+}
+
+// Host lists: an entry of the wrong shape is left out, since one odd pane must not hide the others.
+const records = (v: unknown): Obj[] => (Array.isArray(v) ? v.filter((x): x is Obj => typeof x === "object" && x !== null) : []);
+const name = (o: Obj): string => {
+  const program = typeof o.program === "object" && o.program !== null ? (o.program as Obj).name : undefined;
+  return typeof program === "string" && program !== "" ? program : typeof o.title === "string" ? o.title : "";
+};
+
+export function decodePanes(v: unknown): PaneRef[] {
+  return records(v).flatMap((o) => (typeof o.pane === "string" && typeof o.tab === "string" ? [{ pane: o.pane, terminal: typeof o.terminal === "string" ? o.terminal : null, tab: o.tab, status: typeof o.status === "string" ? o.status : null, name: name(o) }] : []));
+}
+
+export function decodeAgents(v: unknown): AgentRef[] {
+  return records(v).flatMap((o) => (typeof o.pane === "string" && typeof o.tab === "string" && typeof o.seq === "number" ? [{ pane: o.pane, tab: o.tab, seq: o.seq, name: name(o) }] : []));
 }
 
 export const FALLBACK_MONO = "Menlo";

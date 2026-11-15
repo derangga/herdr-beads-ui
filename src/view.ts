@@ -5,13 +5,14 @@ import type { Element, FocusHandle } from "gpui-kit";
 import { h_flex, Input, Popup, Scrollbar, TextView, v_flex } from "gpui-base";
 import type { InputState, VirtualListScrollHandle } from "gpui-base";
 import { age, ALL, fullDate, hiddenByFilters, idChars, isWide, keyFor, listWidth, NO_AGE_BELOW, NOT_CLOSED, pickOptions, ROW_H, shownBead, shownId, SORT_KEYS, statusOptions, textSections, treeRows, typeOptions } from "./rows.ts";
-import type { BdError, Bead, BeadDetail, Detail, Menu, Model, Msg, Part, PartName, TreeNode, TreeRow } from "./types.ts";
+import type { BdError, Bead, BeadDetail, Detail, Menu, Model, Msg, Part, PartName, Target, TreeNode, TreeRow } from "./types.ts";
 
 export type Theme = Record<string, `#${string}`>;
 type Dispatch = (msg: Msg) => void;
 // What the view owns and the model must not hold: the focus target keys reach, the search box, the close reason's box, the list's
-// scroll position, the id font, and `seen`, which hears the rows the list just drew so the owner can tell whether a row is on screen.
-export type Ui = { nav: FocusHandle; search: InputState; reason: InputState; scroll: VirtualListScrollHandle; mono: string; seen: (start: number, end: number) => void };
+// scroll position, the id font, the agent Send to agent would type into, and `seen`, which hears the rows the list just drew so the
+// owner can tell whether a row is on screen.
+export type Ui = { target: Target | null; nav: FocusHandle; search: InputState; reason: InputState; scroll: VirtualListScrollHandle; mono: string; seen: (start: number, end: number) => void };
 
 const icon = (name: string): string => `mods/beads/icons/${name}.svg`;
 
@@ -331,6 +332,7 @@ const KEYS: [string, string][] = [
   ["Tab", "Switch focus between list and detail (wide)"],
   ["[ ]", "Back and forward in the history"],
   ["s", "Change the status of the shown bead"],
+  ["y", "Copy the shown bead's id"],
   ["/", "Search"],
   ["Ctrl+R", "Refresh"],
   ["?", "Show or hide these keys"],
@@ -492,6 +494,86 @@ function statusPill(b: BeadDetail, m: Model, t: Theme, dispatch: Dispatch, ui: U
     );
 }
 
+const FADE = { duration: 120, easing: "ease-out" } as const;
+
+// Both labels stay drawn and trade opacity, because a label mounted fresh has no earlier opacity to animate from. The longer one,
+// invisible, gives the box its width.
+function crossfade(a: string, b: string, showB: boolean, colorB?: `#${string}`): Element {
+  const layer = (text: string, on: boolean, color?: `#${string}`): Element => {
+    const e = div()
+      .absolute()
+      .inset_0()
+      .flex()
+      .items_center()
+      .justify_center()
+      .whitespace_nowrap()
+      .opacity(on ? 1 : 0)
+      .transition("opacity", FADE);
+    return (color === undefined ? e : e.text_color(color)).child(text);
+  };
+  return div()
+    .relative()
+    .flex_none()
+    .child(
+      div()
+        .opacity(0)
+        .whitespace_nowrap()
+        .child(b.length > a.length ? b : a),
+    )
+    .child(layer(a, !showB))
+    .child(layer(b, showB, colorB));
+}
+
+function copyButton(b: BeadDetail, m: Model, t: Theme, dispatch: Dispatch): Element {
+  const copied = m.copied?.id === b.id;
+  return div()
+    .id("copy-id")
+    .px(3)
+    .flex_none()
+    .rounded(4)
+    .text_color(t.muted)
+    .tooltip(copied ? "Copied" : "Copy id (y)")
+    .accessibility_label("Copy id")
+    .cursor_pointer()
+    .hover((s) => s.bg(t.hover).text_color(t.foreground))
+    .active((s) => s.bg(t.selected))
+    .on_click((_e, cx) => {
+      cx.stop_propagation();
+      dispatch({ _tag: "Copy" });
+    })
+    .child(crossfade("⧉", "✓ Copied", copied, pick(t, "green", "ansi2")));
+}
+
+// Dimmed, and dead, when no agent is in the tab. For a moment after a send the label is the answer.
+function sendButton(m: Model, t: Theme, dispatch: Dispatch, ui: Ui): Element {
+  const on = ui.target !== null;
+  return h_flex()
+    .id("send-to-agent")
+    .h(26)
+    .px(8)
+    .flex_none()
+    .items_center()
+    .rounded(6)
+    .border_1()
+    .border_color(t.border)
+    .text_size(12)
+    .text_color(on ? t.foreground : t.muted)
+    .opacity(on ? 1 : 0.5)
+    .tooltip(ui.target === null ? "No agent in this tab" : `Type the prompt into ${ui.target.name}, without Enter`)
+    .accessibility_label("Send to agent")
+    .when(on, (e) =>
+      e
+        .cursor_pointer()
+        .hover((s) => s.bg(t.hover))
+        .active((s) => s.bg(t.selected))
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          dispatch({ _tag: "Send" });
+        }),
+    )
+    .child(crossfade("Send to agent", m.sent?.text ?? "", m.sent !== null));
+}
+
 function metaRow(b: BeadDetail, m: Model, t: Theme, dispatch: Dispatch, ui: Ui, now: number): Element {
   const ago = age(b.created_at, now);
   return h_flex()
@@ -500,7 +582,14 @@ function metaRow(b: BeadDetail, m: Model, t: Theme, dispatch: Dispatch, ui: Ui, 
     .gap_y(4)
     .items_center()
     .text_size(12)
-    .child(div().font_family(ui.mono).text_size(12).text_color(t.muted).child(b.id))
+    .child(
+      h_flex()
+        .gap(2)
+        .items_center()
+        .flex_none()
+        .child(div().font_family(ui.mono).text_size(12).text_color(t.muted).child(b.id))
+        .child(copyButton(b, m, t, dispatch)),
+    )
     .child(statusPill(b, m, t, dispatch, ui))
     .child(div().text_size(11).font_semibold().text_color(priorityColor(b.priority, t)).child(`P${b.priority}`))
     .when(b.assignee !== null, (e) => e.child(div().text_color(t.muted).child(`@${b.assignee}`)))
@@ -535,26 +624,30 @@ function beadBody(d: BeadDetail, e: Detail, m: Model, hidden: boolean, t: Theme,
     ...(hidden ? [div().flex_none().text_size(12).text_color(t.muted).child("Hidden by the current filters")] : []),
     metaRow(d, m, t, dispatch, ui, now),
     ...(m.writeError?.id === d.id ? [div().flex_none().text_size(12).text_color(red(t)).child(writeText(m.writeError))] : []),
-    ...(d.labels.length === 0
-      ? []
-      : [
-          h_flex()
-            .flex_wrap()
-            .gap(4)
-            .flex_none()
-            .children(
-              d.labels.map((l) =>
-                div()
-                  .px(6)
-                  .py(1)
-                  .rounded(4)
-                  .bg(pick(t, "surface0", "raised"))
-                  .text_size(11)
-                  .text_color(t.muted)
-                  .child(l),
-              ),
+    h_flex()
+      .gap(8)
+      .items_start()
+      .flex_none()
+      .child(
+        h_flex()
+          .flex_1()
+          .min_w(0)
+          .flex_wrap()
+          .gap(4)
+          .children(
+            d.labels.map((l) =>
+              div()
+                .px(6)
+                .py(1)
+                .rounded(4)
+                .bg(pick(t, "surface0", "raised"))
+                .text_size(11)
+                .text_color(t.muted)
+                .child(l),
             ),
-        ]),
+          ),
+      )
+      .child(sendButton(m, t, dispatch, ui)),
     ...textSections(d).map(([label, text]) => section(label, t, markdown(`md-${d.id}-${label}`, text))),
     ...tree("Blocked by", "down", e.down, "Nothing blocks this bead.", t, dispatch, ui.mono),
     ...tree("Blocks", "up", e.up, "This bead blocks nothing.", t, dispatch, ui.mono),

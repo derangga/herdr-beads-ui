@@ -63,7 +63,20 @@ export type StatusInfo = { name: string; icon: string; category: string };
 
 export type Direction = "down" | "up";
 
-export type Focus = { cwd: string | null; terminal: string | null };
+// The terminal that was focused when the Viewer opened, and the tab it was in: the Viewer's own tab, which stays fixed.
+export type Opener = { terminal: string | null; tab: string | null };
+
+// The fields of panes() and agents() the Send uses. `name` is the program's name, else the terminal's title.
+export type PaneRef = { pane: string; terminal: string | null; tab: string; status: string | null; name: string };
+export type AgentRef = { pane: string; tab: string; seq: number; name: string };
+
+// A terminal an agent runs in.
+export type Target = { terminal: string; name: string };
+
+// Nothing was pasted in any of these.
+export type SendError = { _tag: "NoTarget" } | { _tag: "TargetGone" } | { _tag: "SendRejected"; text: string };
+
+export type Focus = { cwd: string | null; terminal: string | null; tab: string | null };
 
 // What one load builds: every bead, the ids `bd ready` named, and id -> blocked_by_count from `bd blocked`.
 export type Snapshot = { beads: Bead[]; ready: Set<string>; locks: Map<string, number> };
@@ -124,6 +137,15 @@ export type Model = {
   writeError: { id: string; error: BdError; second: string | null } | null;
   // A write finished while a load was running, so that load may predate it: its answer is dropped and one more load runs.
   reload: boolean;
+  opener: Opener;
+  // The last number handed out to a label that shows for a moment, so an earlier timer cannot clear a later label.
+  flash: number;
+  // "Copied" shows on the id of this bead.
+  copied: { n: number; id: string } | null;
+  // A send is running: the clipboard is borrowed until it ends.
+  sending: boolean;
+  // What the Send button says instead of its name, for a moment.
+  sent: { n: number; text: string } | null;
 };
 
 export type Msg =
@@ -164,7 +186,14 @@ export type Msg =
   // The reason step's answer: closes the shown bead.
   | { _tag: "CloseWith"; reason: string }
   // `error` is null on success. `second`: the failure is of the bd update after bd reopen worked, so the bead is open now.
-  | { _tag: "Written"; id: string; to: string; error: BdError | null; second: boolean };
+  | { _tag: "Written"; id: string; to: string; error: BdError | null; second: boolean }
+  // The shown bead's id to the clipboard.
+  | { _tag: "Copy" }
+  // The shown bead typed, without Enter, into the target agent.
+  | { _tag: "Send" }
+  | { _tag: "Sent"; agent: string }
+  | { _tag: "SendFailed"; error: SendError }
+  | { _tag: "Faded"; what: "copied" | "sent"; n: number };
 
 // "fetch": the bead has stayed shown long enough to ask bd. "loading": long enough for a "Loading" line.
 export type Timer = "fetch" | "loading";
@@ -176,4 +205,8 @@ export type Cmd =
   | { _tag: "Wait"; id: string; gen: number; timer: Timer }
   | { _tag: "Statuses" }
   // Moves a bead from one status to another: the runner picks the bd commands.
-  | { _tag: "Write"; id: string; from: string; to: string; reason: string };
+  | { _tag: "Write"; id: string; from: string; to: string; reason: string }
+  // Writes the id and holds for as long as "Copied" shows.
+  | { _tag: "Copy"; id: string; n: number }
+  | { _tag: "Send"; id: string; title: string; opener: Opener }
+  | { _tag: "Fade"; what: "copied" | "sent"; n: number };

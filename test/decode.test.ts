@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeBlocked, decodeComments, decodeFocus, decodeFont, decodeList, decodeProps, decodeReady, decodeShow, decodeStatuses, decodeTree } from "../src/decode.ts";
+import { decodeAgents, decodeBlocked, decodeComments, decodeFocus, decodeFont, decodeList, decodePanes, decodeProps, decodeReady, decodeShow, decodeStatuses, decodeTree } from "../src/decode.ts";
 import type { Res } from "../src/types.ts";
 import { fixture } from "./fake-host.ts";
 
@@ -177,17 +177,33 @@ test("a decode failure without a known version carries null", () => {
 });
 
 test("focus: cwd and terminal, null when absent or of another type", () => {
-  assert.deepEqual(decodeFocus({ cwd: "/r", terminal: "t1", pane: "p1" }), { cwd: "/r", terminal: "t1" });
-  assert.deepEqual(decodeFocus({ cwd: 3 }), { cwd: null, terminal: null });
+  assert.deepEqual(decodeFocus({ cwd: "/r", terminal: "t1", tab: "b1", pane: "p1" }), { cwd: "/r", terminal: "t1", tab: "b1" });
+  assert.deepEqual(decodeFocus({ cwd: 3 }), { cwd: null, terminal: null, tab: null });
   assert.equal(decodeFocus(null), null);
   assert.equal(decodeFocus("x"), null);
 });
 
-test("props: root is a non-empty string or null", () => {
-  assert.deepEqual(decodeProps({ root: "/work/repo" }), { root: "/work/repo" });
-  for (const bad of [null, undefined, "x", {}, { root: "" }, { root: 3 }]) {
-    assert.deepEqual(decodeProps(bad), { root: null });
+test("props: root and opener are non-empty strings or null", () => {
+  assert.deepEqual(decodeProps({ root: "/work/repo", opener: "t1" }), { root: "/work/repo", opener: "t1" });
+  for (const bad of [null, undefined, "x", {}, { root: "", opener: "" }, { root: 3, opener: 3 }]) {
+    assert.deepEqual(decodeProps(bad), { root: null, opener: null });
   }
+});
+
+test("panes and agents: the fields Send uses, and an entry of the wrong shape is left out", () => {
+  const program = { name: "Claude Code" };
+  assert.deepEqual(decodePanes([{ pane: "p1", terminal: "t1", tab: "b1", status: "idle", program, title: "x" }, { pane: "p2", terminal: null, tab: "b1", status: null, title: "beads" }, { pane: 3 }, null]), [
+    { pane: "p1", terminal: "t1", tab: "b1", status: "idle", name: "Claude Code" },
+    { pane: "p2", terminal: null, tab: "b1", status: null, name: "beads" },
+  ]);
+  assert.deepEqual(
+    decodeAgents([
+      { pane: "p1", tab: "b1", seq: 4, program, title: "x" },
+      { pane: "p1", tab: "b1", seq: "4" },
+    ]),
+    [{ pane: "p1", tab: "b1", seq: 4, name: "Claude Code" }],
+  );
+  assert.deepEqual([decodePanes({}), decodeAgents(null)], [[], []]);
 });
 
 test("font: the settings family, else Menlo", () => {

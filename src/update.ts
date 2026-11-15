@@ -1,8 +1,8 @@
 // The reducer: (Model, Msg) -> (Model, Cmd[]). Pure. Single flight: a refresh during a load is dropped.
-import { BUILT_IN_STATUSES, initFilters, initSort, isWide, reselect, shownBead, shownId, visible } from "./rows.ts";
-import type { Cmd, Detail, Model, Msg, Part, PartName, Res, Timer } from "./types.ts";
+import { BUILT_IN_STATUSES, initFilters, initSort, isWide, reselect, sendText, shownBead, shownId, visible } from "./rows.ts";
+import type { Cmd, Detail, Model, Msg, Opener, Part, PartName, Res, Timer } from "./types.ts";
 
-export const initModel = (): Model => ({
+export const initModel = (opener: Opener = { terminal: null, tab: null }): Model => ({
   snapshot: null,
   loading: false,
   error: null,
@@ -23,6 +23,11 @@ export const initModel = (): Model => ({
   writing: new Map(),
   writeError: null,
   reload: false,
+  opener,
+  flash: 0,
+  copied: null,
+  sending: false,
+  sent: null,
 });
 
 // A load fills the list, so the viewer opens by sending Refresh. After every message the shown bead's detail is started if it is missing.
@@ -213,6 +218,25 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
       const writeError = msg.error === null ? m.writeError : { id: msg.id, error: msg.error, second: msg.to };
       return m.loading ? [{ ...m, writing, writeError, reload: true }, []] : step({ ...m, writing, writeError }, { _tag: "Refresh" });
     }
+    case "Copy": {
+      const b = shownBead(m);
+      // A send borrows the clipboard until it has pasted, so a copy now would send the bare id.
+      if (b === null || m.help || m.sending) {
+        return [m, []];
+      }
+      const n = m.flash + 1;
+      return [{ ...m, flash: n, copied: { n, id: b.id } }, [{ _tag: "Copy", id: b.id, n }]];
+    }
+    case "Send": {
+      const b = shownBead(m);
+      return b === null || m.help || m.sending ? [m, []] : [{ ...m, sending: true }, [{ _tag: "Send", id: b.id, title: b.title, opener: m.opener }]];
+    }
+    case "Sent":
+      return flash({ ...m, sending: false }, `Sent to ${msg.agent}`);
+    case "SendFailed":
+      return flash({ ...m, sending: false }, sendText(msg.error));
+    case "Faded":
+      return [msg.what === "copied" ? (m.copied?.n === msg.n ? { ...m, copied: null } : m) : m.sent?.n === msg.n ? { ...m, sent: null } : m, []];
     case "Retry": {
       const id = shownId(m);
       const d = id === null ? undefined : m.details.get(id);
@@ -225,6 +249,12 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
       return [{ ...m, gen, details: new Map(m.details).set(id, again) }, msg.part === "show" ? [fetch(id, "show", gen), wait(id, gen, "loading")] : [fetch(id, msg.part, gen)]];
     }
   }
+}
+
+// The Send button says `text` until a timer that carries this number runs out.
+function flash(m: Model, text: string): [Model, Cmd[]] {
+  const n = m.flash + 1;
+  return [{ ...m, flash: n, sent: { n, text } }, [{ _tag: "Fade", what: "sent", n }]];
 }
 
 function write(m: Model, id: string, from: string, to: string, reason: string): [Model, Cmd[]] {

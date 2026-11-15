@@ -2,7 +2,7 @@
 
 A herdr-app mod that shows the beads of a repo in a pane split beside your terminal: filter, sort, search, read a bead,
 follow its dependencies, change its status, copy its id and send it to an agent. Terms are in [CONTEXT.md](CONTEXT.md),
-the look and keys in [design/ui.md](design/ui.md), the build in [design/plan.md](design/plan.md).
+the look and keys in [design/ui.md](design/ui.md), the design in [DESIGN.md](DESIGN.md).
 
 Needs herdr-app 0.1.15 or later and `bd` on your PATH.
 

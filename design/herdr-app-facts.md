@@ -1,6 +1,6 @@
 # What the design assumes about herdr-app and bd
 
-Part of the [plan](plan.md). Checked on 2026-11-15 with herdr-app 0.1.15, bd 1.3.4, macOS. The herdr-app window was
+Part of the [design](../DESIGN.md). Checked on 2026-11-15 with herdr-app 0.1.15, bd 1.3.4, macOS. The herdr-app window was
 running. Everything below was run in a scratch tab that I opened (`terminal.open {place: "tab", folder: <scratch folder>}`,
 terminal `t2g`), and the tab was closed afterwards. No other terminal was written to. The temporary probe mod was deleted.
 

@@ -1,0 +1,215 @@
+[
+  {
+    "id": "raccoon-e4n.15",
+    "title": "Build the composition root",
+    "status": "closed",
+    "priority": 0,
+    "issue_type": "task",
+    "assignee": "derangga",
+    "owner": "derangga1011@gmail.com",
+    "created_at": "2026-10-16T09:30:56Z",
+    "created_by": "derangga",
+    "updated_at": "2026-10-16T11:29:55Z",
+    "started_at": "2026-10-16T11:29:03Z",
+    "closed_at": "2026-10-16T11:29:55Z",
+    "close_reason": "Closed",
+    "labels": [
+      "app",
+      "m0"
+    ],
+    "dependencies": [
+      {
+        "issue_id": "raccoon-e4n.15",
+        "depends_on_id": "raccoon-e4n.10",
+        "type": "blocks",
+        "created_at": "2026-10-16T09:30:56Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "raccoon-e4n.15",
+        "depends_on_id": "raccoon-e4n.9",
+        "type": "blocks",
+        "created_at": "2026-10-16T09:30:56Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "raccoon-e4n.15",
+        "depends_on_id": "raccoon-e4n.12",
+        "type": "blocks",
+        "created_at": "2026-10-16T09:30:56Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "raccoon-e4n.15",
+        "depends_on_id": "raccoon-e4n.13",
+        "type": "blocks",
+        "created_at": "2026-10-16T09:30:56Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "raccoon-e4n.15",
+        "depends_on_id": "raccoon-e4n.11",
+        "type": "blocks",
+        "created_at": "2026-10-16T09:30:56Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "raccoon-e4n.15",
+        "depends_on_id": "raccoon-e4n.14",
+        "type": "blocks",
+        "created_at": "2026-10-16T09:30:56Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "raccoon-e4n.15",
+        "depends_on_id": "raccoon-e4n",
+        "type": "parent-child",
+        "created_at": "2026-10-16T09:30:56Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 6,
+    "dependent_count": 2,
+    "comment_count": 0,
+    "parent": "raccoon-e4n"
+  },
+  {
+    "id": "raccoon-e4n",
+    "title": "Foundation",
+    "status": "closed",
+    "priority": 0,
+    "issue_type": "epic",
+    "owner": "derangga1011@gmail.com",
+    "created_at": "2026-10-16T09:29:17Z",
+    "created_by": "derangga",
+    "updated_at": "2026-10-16T12:54:30Z",
+    "closed_at": "2026-10-16T12:54:30Z",
+    "close_reason": "All 15 children closed.",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  },
+  {
+    "id": "raccoon-46u",
+    "title": "Mock Server",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "derangga1011@gmail.com",
+    "created_at": "2026-11-12T03:49:32Z",
+    "created_by": "derangga",
+    "updated_at": "2026-11-12T03:49:32Z",
+    "labels": [
+      "app"
+    ],
+    "dependencies": [
+      {
+        "issue_id": "raccoon-46u",
+        "depends_on_id": "raccoon-ckc",
+        "type": "blocks",
+        "created_at": "2026-11-12T03:49:32Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 0,
+    "comment_count": 0
+  },
+  {
+    "id": "raccoon-46u.5",
+    "title": "Start and stop a Collection's Mock Server from its menu",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "derangga1011@gmail.com",
+    "created_at": "2026-11-12T03:49:36Z",
+    "created_by": "derangga",
+    "updated_at": "2026-11-12T03:49:36Z",
+    "labels": [
+      "app"
+    ],
+    "dependencies": [
+      {
+        "issue_id": "raccoon-46u.5",
+        "depends_on_id": "raccoon-46u.3",
+        "type": "blocks",
+        "created_at": "2026-11-12T03:49:36Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "raccoon-46u.5",
+        "depends_on_id": "raccoon-46u",
+        "type": "parent-child",
+        "created_at": "2026-11-12T03:49:36Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "raccoon-46u.5",
+        "depends_on_id": "raccoon-46u.1",
+        "type": "blocks",
+        "created_at": "2026-11-12T03:49:36Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "raccoon-46u.5",
+        "depends_on_id": "raccoon-46u.4",
+        "type": "blocks",
+        "created_at": "2026-11-12T03:49:36Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 3,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "raccoon-46u"
+  },
+  {
+    "id": "raccoon-46u.3",
+    "title": "Listen for mock requests on 127.0.0.1",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "derangga1011@gmail.com",
+    "created_at": "2026-11-12T03:49:34Z",
+    "created_by": "derangga",
+    "updated_at": "2026-11-12T03:49:34Z",
+    "labels": [
+      "app",
+      "data"
+    ],
+    "dependencies": [
+      {
+        "issue_id": "raccoon-46u.3",
+        "depends_on_id": "raccoon-46u",
+        "type": "parent-child",
+        "created_at": "2026-11-12T03:49:34Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "raccoon-46u.3",
+        "depends_on_id": "raccoon-46u.2",
+        "type": "blocks",
+        "created_at": "2026-11-12T03:49:34Z",
+        "created_by": "derangga",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "raccoon-46u"
+  }
+]

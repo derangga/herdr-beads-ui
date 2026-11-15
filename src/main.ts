@@ -1,18 +1,21 @@
 // Placeholder: draws the Viewed repo. The model lives on the instance, never in module scope.
 import { View, div } from "gpui-kit";
 import type { AsyncContext, Context, Element } from "gpui-kit";
-import { focused, theme } from "herdr";
+import { decodeFocus } from "./decode.ts";
+import { realHost } from "./host.ts";
+import type { Host } from "./host.ts";
 
 export default class BeadsView extends View {
+  host: Host | null = null;
   root: string | null = null;
 
-  init(_props: unknown, _cx: AsyncContext): void {
-    this.root = focused()?.cwd ?? null;
+  init(_props: unknown, cx: AsyncContext): void {
+    this.host = realHost(cx);
+    this.root = decodeFocus(this.host.focused())?.cwd ?? null;
   }
 
   render(_cx: Context): Element {
-    // theme() says string, the setters want `#${string}`: the one cast.
-    const colors = theme() as Record<string, `#${string}`>;
+    const colors = this.host?.theme() ?? {};
     return div()
       .size_full()
       .p(12)

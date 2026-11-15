@@ -1,0 +1,105 @@
+// Runs bd in the Viewed repo and returns a value: the decoded data or a tagged BdError. Nothing here throws.
+import { decodeBlocked, decodeComments, decodeList, decodeReady, decodeShow, decodeStatuses, decodeTree } from "./decode.ts";
+import type { ExecResult, Host } from "./host.ts";
+import type { BdError, Direction, Res } from "./types.ts";
+
+const BD_TIMEOUT_MS = 15_000;
+// Another bd process can hold the database for a moment, so a locked or slow call is tried twice more.
+const RETRY_DELAYS_MS = [300, 900];
+
+const fail = (error: BdError): Res<never> => ({ ok: false, error });
+
+// With --json some bd errors (the maintenance lock, a missing id) are JSON on stdout and stderr is empty, and a
+// warning can sit on stderr beside an error on stdout, so both streams are read.
+function errorText({ stdout, stderr }: ExecResult): string {
+  let out = stdout.trim();
+  try {
+    const message = (JSON.parse(stdout) as { error?: unknown }).error;
+    out = typeof message === "string" ? message : out;
+  } catch {
+    // not JSON: the plain text stands
+  }
+  return [stderr.trim(), out].filter((part) => part !== "").join("\n");
+}
+
+// bd 1.3.4 exits 1 for every failure, so the text decides.
+export function classify(result: ExecResult): BdError {
+  const text = errorText(result);
+  if (text.includes("no beads database found")) {
+    return { _tag: "NoDatabase", text };
+  }
+  if (text.includes("maintenance operation is running")) {
+    return { _tag: "BdLocked", text };
+  }
+  // show: "Issue <id> not found" or "no issues found matching"; dep tree and comments: "no issue found matching".
+  if (/^Issue \S+ not found/m.test(text) || /no issues? found matching/.test(text)) {
+    return { _tag: "BeadGone", text };
+  }
+  return { _tag: "BdRejected", code: result.code, text };
+}
+
+// exec rejects with "`herdr.exec`: <program> took longer than <n> s and was stopped" on a timeout and
+// "`herdr.exec`: cannot run <program>: <os error>" when it cannot start, and the second reads the same for a
+// missing program and a missing cwd. A bd that starts without the cwd tells them apart.
+async function rejection(host: Host, text: string): Promise<BdError> {
+  if (/took longer than .* and was stopped/.test(text)) {
+    return { _tag: "BdTimeout", text };
+  }
+  if (!text.includes("cannot run ")) {
+    return { _tag: "BdRejected", code: -1, text };
+  }
+  const bdStarts = await host.exec("bd", ["--version"], { timeout: BD_TIMEOUT_MS }).then(
+    () => true,
+    () => false,
+  );
+  return bdStarts ? { _tag: "BdRejected", code: -1, text } : { _tag: "BdMissing", text };
+}
+
+async function once(host: Host, root: string, args: string[]): Promise<Res<string>> {
+  let result: ExecResult;
+  try {
+    result = await host.exec("bd", args, { cwd: root, timeout: BD_TIMEOUT_MS });
+  } catch (e) {
+    return fail(await rejection(host, e instanceof Error ? e.message : String(e)));
+  }
+  return result.code === 0 ? { ok: true, value: result.stdout } : fail(classify(result));
+}
+
+// The retry wraps the call, so no caller repeats it.
+export async function bd(host: Host, root: string, args: string[]): Promise<Res<string>> {
+  let res = await once(host, root, args);
+  for (const delay of RETRY_DELAYS_MS) {
+    if (res.ok || (res.error._tag !== "BdLocked" && res.error._tag !== "BdTimeout")) {
+      break;
+    }
+    await host.sleep(delay);
+    res = await once(host, root, args);
+  }
+  return res;
+}
+
+async function bdVersion(host: Host, root: string): Promise<string | null> {
+  const res = await once(host, root, ["--version"]);
+  return res.ok ? (res.value.match(/\d+\.\d+\.\d+\S*/)?.[0] ?? null) : null;
+}
+
+// The version is asked for only when a decode fails, so the good path costs one bd call.
+export async function bdJson<T>(host: Host, root: string, args: string[], decode: (text: string, version: string | null) => Res<T>): Promise<Res<T>> {
+  const out = await bd(host, root, args);
+  if (!out.ok) {
+    return out;
+  }
+  const res = decode(out.value, null);
+  if (res.ok || res.error._tag !== "Undecodable") {
+    return res;
+  }
+  return decode(out.value, await bdVersion(host, root));
+}
+
+export const listBeads = (host: Host, root: string) => bdJson(host, root, ["list", "--all", "-n", "0", "--brief", "--json"], decodeList);
+export const readyIds = (host: Host, root: string) => bdJson(host, root, ["ready", "-n", "0", "--json"], decodeReady);
+export const blockedBeads = (host: Host, root: string) => bdJson(host, root, ["blocked", "--json"], decodeBlocked);
+export const showBead = (host: Host, root: string, id: string) => bdJson(host, root, ["show", id, "--json"], decodeShow);
+export const depTree = (host: Host, root: string, id: string, direction: Direction) => bdJson(host, root, ["dep", "tree", id, `--direction=${direction}`, "--json"], decodeTree);
+export const beadComments = (host: Host, root: string, id: string) => bdJson(host, root, ["comments", id, "--json"], decodeComments);
+export const statuses = (host: Host, root: string) => bdJson(host, root, ["statuses", "--json"], decodeStatuses);

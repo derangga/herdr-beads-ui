@@ -100,3 +100,30 @@ stderr carries it):
 It failed at once (0 s), with no wait. A decoder that maps errors to tags should match on the substring
 `maintenance operation is running` (locked) and `no beads database found` (no database), and read both stdout and
 stderr, because `--json` moves some errors to stdout.
+
+## 4. Rejection texts of `exec` and bd's errors for other per-id commands
+
+Checked on 2026-11-15 with herdr-app 0.1.15 and bd 1.3.4. A temporary probe mod (`beads-probe`) ran inside a scratch tab
+(opened with `terminal.open {place: "tab"}`, closed afterwards with `tab.close`) and wrote each rejection's `message` to a
+file. The probe mod was deleted. `herdr-app check` loads a mod once but does not wait for async work, so a real pane was
+needed. Each rejection is an `Error`.
+
+| Call | Rejection message |
+| --- | --- |
+| `exec("sleep", ["5"], {timeout: 500})` | `` `herdr.exec`: sleep took longer than 0.5 s and was stopped `` |
+| `exec("no-such-bin-xyz", [])` | `` `herdr.exec`: cannot run no-such-bin-xyz: No such file or directory (os error 2) `` |
+| `exec("bd", ["list"], {cwd: "/no/such/folder"})` | `` `herdr.exec`: cannot run bd: No such file or directory (os error 2) `` |
+
+A missing program and a missing `cwd` give the same text, so the text alone cannot tell them apart. The runner tells
+them apart by starting `bd --version` with no `cwd` after a "cannot run" rejection: if that starts, the folder is the
+problem (BdRejected), otherwise bd is missing (BdMissing).
+
+Other per-id commands with an unknown id, run with `--json` in this repo. All exit 1 and print nothing to stderr; the
+text is JSON on stdout (unlike `bd show`, which also prints `Issue <id> not found` to stderr):
+
+- `bd dep tree nope-123 --json` and `bd dep tree nope-123 --direction=up --json`:
+  `{"error": "resolving issue ID nope-123: no issue found matching \"nope-123\"", "schema_version": 1}`
+- `bd comments nope-123 --json`:
+  `{"error": "resolving nope-123: no issue found matching \"nope-123\"", "schema_version": 1}`
+
+`show` says "no issue**s** found matching", these say "no issue found matching". The runner matches both as BeadGone.

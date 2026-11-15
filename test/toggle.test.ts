@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { TOGGLE_MS, beadsPane, clickToggle, isToggle, watchToggle } from "../src/toggle-state.ts";
+import { TOGGLE_MS, beadsPane, clickToggle, isKeys, isToggle, overlayOf, watchToggle } from "../src/toggle-state.ts";
 import { fakeHost } from "./fake-host.ts";
 
 const panes = [
@@ -14,6 +14,11 @@ test("only props role toggle makes the button's copy", () => {
   assert.equal(isToggle({ role: "toggle" }), true);
   assert.equal(isToggle({ root: "/r" }), false);
   assert.equal(isToggle(null), false);
+  // The keys dialog's copy, and the overlay id herdr hands it.
+  assert.equal(isKeys({ role: "keys", overlay: "o1" }), true);
+  assert.equal(isKeys({ role: "toggle" }), false);
+  assert.equal(overlayOf({ role: "keys", overlay: "o1" }), "o1");
+  assert.equal(overlayOf({ role: "keys" }), null);
 });
 
 test("lit only for a beads pane in the focused tab", () => {

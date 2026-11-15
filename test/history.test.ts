@@ -110,7 +110,6 @@ test("jumping to the shown bead, or walking with nothing on that side, changes n
   const m = open();
   assert.equal(steps(m, jump("a-1")), m);
   assert.equal(steps(m, forward), m);
-  assert.deepEqual(steps(m, jump("a-2"), { _tag: "ToggleHelp" }, back).back, ["a-1"]);
 });
 
 test("a jump lands on a bead the list has: it is selected, and the list keeps its order", () => {

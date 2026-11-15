@@ -1,6 +1,5 @@
 // The reducer: (Model, Msg) -> (Model, Cmd[]). Pure. Single flight: a refresh during a load is dropped.
 import { BUILT_IN_STATUSES, initFilters, initSort, isWide, reselect, sendText, shownBead, shownId, visible } from "./rows.ts";
-import { emptyState } from "./states.ts";
 import type { Cmd, Detail, Model, Msg, Opener, Part, PartName, Res, Timer } from "./types.ts";
 
 export const initModel = (opener: Opener = { terminal: null, tab: null }): Model => ({
@@ -21,7 +20,6 @@ export const initModel = (opener: Opener = { terminal: null, tab: null }): Model
   pane: "list",
   searching: false,
   menu: null,
-  help: false,
   statuses: BUILT_IN_STATUSES,
   writing: new Map(),
   writeError: null,
@@ -142,8 +140,8 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
     case "Select":
       return [pick(m, msg.id), []];
     case "Move":
-      // The keys panel covers the list, so a move would change a selection nobody can see.
-      return [m.pane === "list" && !m.help ? move(m, msg.delta) : m, []];
+      // The narrow detail covers the list, so a move would change a selection nobody can see.
+      return [m.pane === "list" ? move(m, msg.delta) : m, []];
     case "Click":
       // A click opens the detail when it fills the Viewer, and only selects when the list sits beside it.
       return [{ ...pick(m, msg.id), menu: null, searching: false, pane: isWide(m) ? "list" : "detail" }, []];
@@ -151,13 +149,12 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
       if (m.searching) {
         return [{ ...m, searching: false }, []];
       }
-      return [m.selected === null || m.help ? m : { ...m, pane: "detail" }, []];
+      // Wide shows the detail already and the wheel scrolls it under the pointer, so the list keeps the keyboard.
+      return [m.selected === null || isWide(m) ? m : { ...m, pane: "detail" }, []];
     case "Escape":
       return [escape(m), []];
-    case "Tab":
-      return [isWide(m) && !m.help ? { ...m, pane: m.pane === "list" ? "detail" : "list" } : m, []];
     case "BackToList":
-      return [{ ...toList(m), help: false }, []];
+      return [toList(m), []];
     case "Jump": {
       const cur = shownId(m);
       return cur === null || cur === msg.id ? [m, []] : [land({ ...m, back: [...m.back, cur], forward: [] }, msg.id), []];
@@ -165,7 +162,7 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
     case "Walk": {
       const cur = shownId(m);
       const id = (msg.delta < 0 ? m.back : m.forward).at(-1);
-      if (cur === null || id === undefined || m.help) {
+      if (cur === null || id === undefined) {
         return [m, []];
       }
       return [land({ ...m, ...(msg.delta < 0 ? { back: m.back.slice(0, -1), forward: [...m.forward, cur] } : { back: [...m.back, cur], forward: m.forward.slice(0, -1) }) }, id), []];
@@ -174,23 +171,23 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
       // Only the width: the selection, the filters, the search and the pane stay, so crossing a breakpoint redraws the same state.
       return [msg.width === m.width ? m : { ...m, width: msg.width }, []];
     case "FocusSearch":
-      return [{ ...m, searching: true, menu: null, help: false, pane: "list" }, []];
+      return [{ ...m, searching: true, menu: null, pane: "list" }, []];
     case "SearchFocused":
       return [msg.on === m.searching ? m : { ...m, searching: msg.on }, []];
     case "ToggleMenu": {
       if (msg.menu === "pick") {
         // Only a bead the pill is drawn for, and not while bd writes it.
         const b = shownBead(m);
-        if (b === null || m.help || m.writing.has(b.id)) {
+        if (b === null || m.writing.has(b.id)) {
           return [m, []];
         }
         return [{ ...m, menu: m.menu === "pick" || m.menu === "reason" ? null : "pick", writeError: null }, []];
       }
       return [{ ...m, menu: m.menu === msg.menu ? null : msg.menu }, []];
     }
-    case "ToggleHelp":
-      // The keys panel is part of the viewer, which an empty screen replaces: toggling it there would pop it open unseen later.
-      return emptyState(m, null) !== null ? [m, []] : [{ ...m, help: !m.help, menu: null }, []];
+    case "ShowKeys":
+      // main.ts opens the keys as a dialog, which closes itself (Esc, a press outside): nothing here to keep in step.
+      return [m, []];
     case "Shown":
       return [patch(m, msg.id, "show", msg.gen, { show: toPart(msg.res) }), []];
     case "Tree":
@@ -234,7 +231,7 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
     case "Copy": {
       const b = shownBead(m);
       // A send borrows the clipboard until it has pasted, so a copy now would send the bare id.
-      if (b === null || m.help || m.sending) {
+      if (b === null || m.sending) {
         return [m, []];
       }
       const n = m.flash + 1;
@@ -242,7 +239,7 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
     }
     case "Send": {
       const b = shownBead(m);
-      return b === null || m.help || m.sending ? [m, []] : [{ ...m, sending: true }, [{ _tag: "Send", id: b.id, title: b.title, opener: m.opener }]];
+      return b === null || m.sending ? [m, []] : [{ ...m, sending: true }, [{ _tag: "Send", id: b.id, title: b.title, opener: m.opener }]];
     }
     case "Sent":
       return flash({ ...m, sending: false }, `Sent to ${msg.agent}`);
@@ -281,13 +278,10 @@ function move(m: Model, delta: number): Model {
   return next === undefined || (next.id === m.selected && m.shown === null) ? m : pick(m, next.id);
 }
 
-// Esc closes the nearest thing: a menu, the keys panel, the search box (emptied), then the detail that fills the Viewer.
+// Esc closes the nearest thing: a menu, the search box (emptied), then the detail that fills the Viewer.
 function escape(m: Model): Model {
   if (m.menu !== null) {
     return { ...m, menu: null };
-  }
-  if (m.help) {
-    return { ...m, help: false };
   }
   if (m.searching) {
     return reselect({ ...m, searching: false, filters: { ...m.filters, search: "" } });

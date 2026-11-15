@@ -34,6 +34,14 @@ export function fakeHost(exec: (call: Call, n: number) => Reply, over: Partial<H
       events.push(`run ${name} ${JSON.stringify(args ?? {})}`);
       return null;
     },
+    openOverlay(spec) {
+      events.push(`overlay ${JSON.stringify(spec)}`);
+      return "o1";
+    },
+    closeOverlay(id) {
+      events.push(`close ${id}`);
+      return null;
+    },
     focused: () => null,
     panes: () => [],
     agents: () => [],

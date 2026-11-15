@@ -156,16 +156,13 @@ test("the empty screen's Retry says Retrying while the retry runs", () => {
   assert.deepEqual([retryLabel(false), retryLabel(true)], ["Retry", "Retrying…"]);
 });
 
-test("? does nothing while an empty screen replaces the viewer, so the keys panel is not opened unseen", () => {
-  const help: Msg = { _tag: "ToggleHelp" };
+test("? leaves the model alone on every screen, since the keys open as a dialog that closes itself", () => {
+  const keys: Msg = { _tag: "ShowKeys" };
   const none = start(fakeHost(() => ok("")).host).model;
-  const remote = start(fakeHost(() => ok(""), { focused: () => FOCUS, spaces: () => SPACE("box") }).host).model;
   const noDb = steps(start(fakeHost(() => ok(""), { focused: () => FOCUS }).host).model, refresh, loaded({ _tag: "NoDatabase", text: "x" }));
-  for (const m of [none, remote, noDb]) {
-    assert.deepEqual(update(m, help), [m, []]);
+  for (const m of [none, noDb, modelOf([bead("a-1")])]) {
+    assert.deepEqual(update(m, keys), [m, []]);
   }
-  // With a list to show, it still toggles.
-  assert.equal(steps(modelOf([bead("a-1")]), loaded({ _tag: "NoDatabase", text: "x" }), help).help, true);
 });
 
 test("the Viewer takes the keyboard back only while herdr's focus is on its own pane and no box or menu holds it", () => {

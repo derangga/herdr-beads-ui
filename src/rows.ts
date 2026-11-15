@@ -216,8 +216,6 @@ export function keyFor(m: Model, keystroke: string): Msg | null {
       return { _tag: "Move", delta: -1 };
     case "enter":
       return { _tag: "Enter" };
-    case "tab":
-      return { _tag: "Tab" };
     case "/":
       return { _tag: "FocusSearch" };
     case "ctrl-r":
@@ -233,7 +231,7 @@ export function keyFor(m: Model, keystroke: string): Msg | null {
     case "?":
     case "shift-/":
     case "shift-?":
-      return { _tag: "ToggleHelp" };
+      return { _tag: "ShowKeys" };
     default:
       return null;
   }

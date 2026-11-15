@@ -165,11 +165,13 @@ function decodeFont(v) {
 }
 
 // src/host.ts
-import { agents, exec, focused, nextCommand, panes, props, run, settings, spaces, theme } from "herdr";
+import { agents, closeOverlay, exec, focused, nextCommand, openOverlay, panes, props, run, settings, spaces, theme } from "herdr";
 var realHost = (cx) => ({
   exec: (command, args, options) => exec(command, args, options),
   sleep: (ms) => cx.sleep(ms),
   run: (name2, args) => run(name2, args),
+  openOverlay: (spec) => openOverlay(spec),
+  closeOverlay: (id) => closeOverlay(id),
   focused: () => focused(),
   panes: () => panes(),
   agents: () => agents(),
@@ -340,8 +342,6 @@ function keyFor(m, keystroke) {
       return { _tag: "Move", delta: -1 };
     case "enter":
       return { _tag: "Enter" };
-    case "tab":
-      return { _tag: "Tab" };
     case "/":
       return { _tag: "FocusSearch" };
     case "ctrl-r":
@@ -357,7 +357,7 @@ function keyFor(m, keystroke) {
     case "?":
     case "shift-/":
     case "shift-?":
-      return { _tag: "ToggleHelp" };
+      return { _tag: "ShowKeys" };
     default:
       return null;
   }
@@ -382,7 +382,6 @@ var initModel = (opener = { terminal: null, tab: null }) => ({
   pane: "list",
   searching: false,
   menu: null,
-  help: false,
   statuses: BUILT_IN_STATUSES,
   writing: /* @__PURE__ */ new Map(),
   writeError: null,
@@ -478,20 +477,18 @@ function step(m, msg) {
     case "Select":
       return [pick(m, msg.id), []];
     case "Move":
-      return [m.pane === "list" && !m.help ? move(m, msg.delta) : m, []];
+      return [m.pane === "list" ? move(m, msg.delta) : m, []];
     case "Click":
       return [{ ...pick(m, msg.id), menu: null, searching: false, pane: isWide(m) ? "list" : "detail" }, []];
     case "Enter":
       if (m.searching) {
         return [{ ...m, searching: false }, []];
       }
-      return [m.selected === null || m.help ? m : { ...m, pane: "detail" }, []];
+      return [m.selected === null || isWide(m) ? m : { ...m, pane: "detail" }, []];
     case "Escape":
       return [escape(m), []];
-    case "Tab":
-      return [isWide(m) && !m.help ? { ...m, pane: m.pane === "list" ? "detail" : "list" } : m, []];
     case "BackToList":
-      return [{ ...toList(m), help: false }, []];
+      return [toList(m), []];
     case "Jump": {
       const cur = shownId(m);
       return cur === null || cur === msg.id ? [m, []] : [land({ ...m, back: [...m.back, cur], forward: [] }, msg.id), []];
@@ -499,7 +496,7 @@ function step(m, msg) {
     case "Walk": {
       const cur = shownId(m);
       const id = (msg.delta < 0 ? m.back : m.forward).at(-1);
-      if (cur === null || id === void 0 || m.help) {
+      if (cur === null || id === void 0) {
         return [m, []];
       }
       return [land({ ...m, ...msg.delta < 0 ? { back: m.back.slice(0, -1), forward: [...m.forward, cur] } : { back: [...m.back, cur], forward: m.forward.slice(0, -1) } }, id), []];
@@ -507,21 +504,21 @@ function step(m, msg) {
     case "Resized":
       return [msg.width === m.width ? m : { ...m, width: msg.width }, []];
     case "FocusSearch":
-      return [{ ...m, searching: true, menu: null, help: false, pane: "list" }, []];
+      return [{ ...m, searching: true, menu: null, pane: "list" }, []];
     case "SearchFocused":
       return [msg.on === m.searching ? m : { ...m, searching: msg.on }, []];
     case "ToggleMenu": {
       if (msg.menu === "pick") {
         const b = shownBead(m);
-        if (b === null || m.help || m.writing.has(b.id)) {
+        if (b === null || m.writing.has(b.id)) {
           return [m, []];
         }
         return [{ ...m, menu: m.menu === "pick" || m.menu === "reason" ? null : "pick", writeError: null }, []];
       }
       return [{ ...m, menu: m.menu === msg.menu ? null : msg.menu }, []];
     }
-    case "ToggleHelp":
-      return emptyState(m, null) !== null ? [m, []] : [{ ...m, help: !m.help, menu: null }, []];
+    case "ShowKeys":
+      return [m, []];
     case "Shown":
       return [patch(m, msg.id, "show", msg.gen, { show: toPart(msg.res) }), []];
     case "Tree":
@@ -560,7 +557,7 @@ function step(m, msg) {
     }
     case "Copy": {
       const b = shownBead(m);
-      if (b === null || m.help || m.sending) {
+      if (b === null || m.sending) {
         return [m, []];
       }
       const n = m.flash + 1;
@@ -568,7 +565,7 @@ function step(m, msg) {
     }
     case "Send": {
       const b = shownBead(m);
-      return b === null || m.help || m.sending ? [m, []] : [{ ...m, sending: true }, [{ _tag: "Send", id: b.id, title: b.title, opener: m.opener }]];
+      return b === null || m.sending ? [m, []] : [{ ...m, sending: true }, [{ _tag: "Send", id: b.id, title: b.title, opener: m.opener }]];
     }
     case "Sent":
       return flash({ ...m, sending: false }, `Sent to ${msg.agent}`);
@@ -605,9 +602,6 @@ function move(m, delta) {
 function escape(m) {
   if (m.menu !== null) {
     return { ...m, menu: null };
-  }
-  if (m.help) {
-    return { ...m, help: false };
   }
   if (m.searching) {
     return reselect({ ...m, searching: false, filters: { ...m.filters, search: "" } });
@@ -872,6 +866,8 @@ var TOGGLE_MS = 500;
 var text2 = (x) => typeof x === "string" && x !== "" ? x : null;
 var field = (o, key) => typeof o === "object" && o !== null ? o[key] : void 0;
 var isToggle = (props2) => field(props2, "role") === "toggle";
+var isKeys = (props2) => field(props2, "role") === "keys";
+var overlayOf = (props2) => text2(field(props2, "overlay"));
 function beadsPane(panes2, focus) {
   const tab = text2(field(focus, "tab"));
   if (tab === null || !Array.isArray(panes2)) {
@@ -1033,18 +1029,22 @@ function listColumn(m, rows, t, dispatch, ui, narrow, now) {
 }
 var KEYS = [
   ["j k  \u2193 \u2191", "Move the selection"],
-  ["\u21B5", "Open the detail (narrow) or focus it (wide)"],
+  ["\u21B5", "Open the detail (narrow)"],
   ["Esc", "Back to the list (narrow), clear the search, close a menu"],
-  ["Tab", "Switch focus between list and detail (wide)"],
   ["[ ]", "Back and forward in the history"],
   ["s", "Change the status of the shown bead"],
   ["y", "Copy the shown bead's id"],
   ["/", "Search"],
   ["Ctrl+R", "Refresh"],
-  ["?", "Show or hide these keys"]
+  ["?", "Show these keys"]
 ];
-function keysPanel(t, mono) {
-  return v_flex().flex_1().min_h(0).p(14).gap(6).text_size(12).child(div().font_semibold().child("Keys")).children(KEYS.map(([k, what]) => h_flex2().gap(12).child(div().w(90).flex_none().font_family(mono).text_size(11).text_color(t.accent).child(k)).child(div().flex_1().min_w(0).text_color(t.muted).child(what))));
+function keysDialog(t, mono, nav, close) {
+  return v_flex().id("keys").size_full().p(16).gap(8).track_focus(nav).on_key_down((ev, cx) => {
+    if (["escape", "?", "shift-/", "shift-?"].includes(ev.keystroke)) {
+      cx.stop_propagation();
+      close();
+    }
+  }).text_size(12).text_color(t.foreground).child(h_flex2().pb(4).items_center().child(div().flex_1().font_semibold().child("Keys")).child(div().text_size(11).text_color(t.dim).child("Esc to close"))).children(KEYS.map(([k, what]) => h_flex2().gap(12).child(div().w(90).flex_none().font_family(mono).text_size(11).text_color(t.accent).child(k)).child(div().flex_1().min_w(0).text_color(t.muted).child(what))));
 }
 var heading = (label, t) => div().text_size(11).font_semibold().text_color(t.muted).child(label.toUpperCase());
 var section = (label, t, ...body) => v_flex().gap(4).flex_none().child(heading(label, t)).children(body);
@@ -1202,7 +1202,7 @@ function detailBody(m, rows, t, dispatch, ui, now) {
 }
 function detailPane(m, rows, t, dispatch, ui, narrow, now) {
   const scroll = `detail-${shownId(m) ?? "none"}`;
-  return v_flex().flex_1().min_w(0).min_h(0).when(!narrow, (e) => e.border_l(2).border_color(m.pane === "detail" ? t.accent : t.border)).child(
+  return v_flex().flex_1().min_w(0).min_h(0).when(!narrow, (e) => e.border_l(1).border_color(t.border)).child(
     h_flex2().h(36).flex_none().px(8).gap(4).items_center().border_b(1).border_color(t.border).when(
       narrow,
       (e) => e.child(
@@ -1213,7 +1213,7 @@ function detailPane(m, rows, t, dispatch, ui, narrow, now) {
       )
     ).child(walkButton("history-back", "\u2039", "Back ([)", m.back.length > 0, t, () => dispatch({ _tag: "Walk", delta: -1 }))).child(walkButton("history-forward", "\u203A", "Forward (])", m.forward.length > 0, t, () => dispatch({ _tag: "Walk", delta: 1 })))
   ).child(
-    m.help ? keysPanel(t, ui.mono) : div().flex_1().min_h(0).relative().child(
+    div().flex_1().min_h(0).relative().child(
       v_flex().id(scroll).absolute().inset_0().overflow_y_scroll().p(14).gap(10).children(detailBody(m, rows, t, dispatch, ui, now))
     ).child(Scrollbar.vertical(scroll).absolute().inset_0())
   );
@@ -1248,7 +1248,7 @@ function draw(m, rows, t, dispatch, ui, now) {
   }).when(empty !== null, (e) => e.child(emptyView(empty?.title ?? "", empty?.hint ?? null, empty?.retry ?? false, m.loading, t, dispatch))).when(empty === null && detailFull, (e) => e.child(detailPane(m, rows, t, dispatch, ui, true, now))).when(
     empty === null && !detailFull,
     (e) => e.child(
-      m.help ? keysPanel(t, ui.mono) : wide ? h_flex2().flex_1().min_h(0).items_stretch().child(list(m, rows, t, dispatch, ui, error, now, true).w(listWidth(m.width)).flex_none()).child(detailPane(m, rows, t, dispatch, ui, false, now)) : list(m, rows, t, dispatch, ui, error, now, false).flex_1()
+      wide ? h_flex2().flex_1().min_h(0).items_stretch().child(list(m, rows, t, dispatch, ui, error, now, true).w(listWidth(m.width)).flex_none()).child(detailPane(m, rows, t, dispatch, ui, false, now)) : list(m, rows, t, dispatch, ui, error, now, false).flex_1()
     ).child(footer(m, rows, t, wide))
   );
 }
@@ -1265,6 +1265,7 @@ function list(m, rows, t, dispatch, ui, error, now, wide) {
 
 // src/main.ts
 var KEYBOARD_MS = 200;
+var keysOpen = 0;
 function rowsCache() {
   let last = null;
   return (m) => {
@@ -1293,12 +1294,23 @@ var BeadsView = class extends View {
   poll;
   // The Viewer's own pane in herdr, once known (see focusNav).
   own = null;
+  // Set only on the keys dialog's copy (props role "keys"): the overlay id it closes itself with.
+  keys;
   init(_props, cx) {
     this.cx = cx;
     this.host = realHost(cx);
     if (isToggle(this.host.props())) {
       this.toggle = { pane: beadsPane(this.host.panes(), this.host.focused()) };
       this.poll = watchToggle(cx, this.host, this.toggle);
+      return;
+    }
+    if (isKeys(this.host.props())) {
+      this.keys = overlayOf(this.host.props());
+      keysOpen++;
+      this.mono = decodeFont(this.host.settings());
+      this.nav = cx.focus_handle();
+      this.nav.focus();
+      cx.timer.after(300, () => this.nav.focus());
       return;
     }
     const { root, model } = start(this.host);
@@ -1326,7 +1338,7 @@ var BeadsView = class extends View {
     cx.spawn(() => this.listen());
     this.focusNav();
     this.poll = cx.timer.every(KEYBOARD_MS, () => {
-      if (!this.store.closed && takesKeyboard(this.own, decodeFocus(this.host.focused())?.pane ?? null, this.nav.is_focused(), this.store.model)) {
+      if (!this.store.closed && keysOpen === 0 && takesKeyboard(this.own, decodeFocus(this.host.focused())?.pane ?? null, this.nav.is_focused(), this.store.model)) {
         this.nav.focus();
       }
     });
@@ -1360,12 +1372,15 @@ var BeadsView = class extends View {
       if (f !== null && f.terminal === null && f.pane !== null) {
         this.own = f.pane;
       }
-      if (!this.store.model.searching && this.store.model.menu === null) {
+      if (!this.store.model.searching && this.store.model.menu === null && keysOpen === 0) {
         this.nav.focus();
       }
     });
   }
   dispatch(msg) {
+    if (msg._tag === "ShowKeys" && keysOpen === 0) {
+      this.host.openOverlay({ mod: "beads", props: { role: "keys" }, kind: "dialog", width: 460, height: 320 });
+    }
     this.store.dispatch(msg);
   }
   // What the model decided that the view's own state must follow: the box's text and focus, and the list's scroll.
@@ -1397,6 +1412,10 @@ var BeadsView = class extends View {
     if (this.toggle !== void 0) {
       return drawToggle(this.toggle.pane !== null, t, () => clickToggle(this.host));
     }
+    if (this.keys !== void 0) {
+      const id = this.keys;
+      return keysDialog(t, this.mono, this.nav, () => id === null ? null : this.host.closeOverlay(id));
+    }
     const target = pickTarget(this.store.model.opener, decodePanes(this.host.panes()), decodeAgents(this.host.agents()));
     const ui = { target, root: this.root, nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start2, end) => this.seen = [start2, end] };
     return draw(this.store.model, this.rows(this.store.model), t, (msg) => this.dispatch(msg), ui, Date.now());
@@ -1405,6 +1424,10 @@ var BeadsView = class extends View {
   close(_cx) {
     this.poll?.cancel();
     if (this.toggle !== void 0) {
+      return;
+    }
+    if (this.keys !== void 0) {
+      keysOpen--;
       return;
     }
     this.store.close();

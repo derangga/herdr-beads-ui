@@ -133,7 +133,6 @@ export type Model = {
   // The search box has the keyboard, so a key types instead of being a command.
   searching: boolean;
   menu: Menu | null;
-  help: boolean;
   // The names the status picker lists: bd's, or the built-in five until bd answers or when it cannot.
   statuses: string[];
   // Beads with a status write in flight. "running" is bd running; "reloading" is the write done and the list loading again, so the
@@ -170,7 +169,6 @@ export type Msg =
   | { _tag: "Click"; id: string }
   | { _tag: "Enter" }
   | { _tag: "Escape" }
-  | { _tag: "Tab" }
   | { _tag: "BackToList" }
   // An id in the detail was clicked.
   | { _tag: "Jump"; id: string }
@@ -180,7 +178,7 @@ export type Msg =
   | { _tag: "FocusSearch" }
   | { _tag: "SearchFocused"; on: boolean }
   | { _tag: "ToggleMenu"; menu: Menu }
-  | { _tag: "ToggleHelp" }
+  | { _tag: "ShowKeys" }
   | { _tag: "Shown"; id: string; gen: number; res: Res<BeadDetail> }
   | { _tag: "Tree"; id: string; gen: number; direction: Direction; res: Res<TreeNode[]> }
   | { _tag: "Discussed"; id: string; gen: number; res: Res<Comment[]> }

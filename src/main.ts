@@ -10,13 +10,17 @@ import { pickTarget, visible } from "./rows.ts";
 import { start, takesKeyboard } from "./states.ts";
 import { Store } from "./store.ts";
 import { drawToggle } from "./toggle.ts";
-import { beadsPane, clickToggle, isToggle, watchToggle } from "./toggle-state.ts";
+import { beadsPane, clickToggle, isKeys, isToggle, overlayOf, watchToggle } from "./toggle-state.ts";
 import type { Bead, Model, Msg } from "./types.ts";
-import { draw } from "./view.ts";
+import { draw, keysDialog } from "./view.ts";
 
 // How soon the Viewer takes the keyboard back after losing it while herdr's focus stays on its pane: under a human's
 // pause between a click elsewhere and the next key.
 const KEYBOARD_MS = 200;
+
+// Keys dialogs open now. Module scope on purpose: every copy shares this module, so a Viewer sees the keys copy open
+// and close. Unlike shared(), it is not persisted, so a quit with the dialog open cannot leave it stuck.
+let keysOpen = 0;
 
 // The visible rows again only when what they are built from changed: a hover, a resize or a key that moves nothing redraws without a filter and a sort.
 function rowsCache(): (m: Model) => Bead[] {
@@ -48,6 +52,8 @@ export default class BeadsView extends View {
   poll: { cancel(): void } | undefined;
   // The Viewer's own pane in herdr, once known (see focusNav).
   own: string | null = null;
+  // Set only on the keys dialog's copy (props role "keys"): the overlay id it closes itself with.
+  keys: string | null | undefined;
 
   init(_props: unknown, cx: AsyncContext): void {
     this.cx = cx;
@@ -55,6 +61,16 @@ export default class BeadsView extends View {
     if (isToggle(this.host.props())) {
       this.toggle = { pane: beadsPane(this.host.panes(), this.host.focused()) };
       this.poll = watchToggle(cx, this.host, this.toggle);
+      return;
+    }
+    if (isKeys(this.host.props())) {
+      this.keys = overlayOf(this.host.props());
+      keysOpen++;
+      this.mono = decodeFont(this.host.settings());
+      this.nav = cx.focus_handle();
+      // Again once drawn with its handle, as herdr's help dialog does.
+      this.nav.focus();
+      cx.timer.after(300, () => this.nav.focus());
       return;
     }
     const { root, model } = start(this.host);
@@ -87,7 +103,8 @@ export default class BeadsView extends View {
     // shortcut: polls because nothing tells a mod that the keyboard left it while herdr's focus stayed on its pane (zoom,
     // a tab switch, the window losing focus); drop it if herdr ever sends "focus" for all of those.
     this.poll = cx.timer.every(KEYBOARD_MS, () => {
-      if (!this.store.closed && takesKeyboard(this.own, decodeFocus(this.host.focused())?.pane ?? null, this.nav.is_focused(), this.store.model)) {
+      // The keys dialog holds the keyboard on purpose.
+      if (!this.store.closed && keysOpen === 0 && takesKeyboard(this.own, decodeFocus(this.host.focused())?.pane ?? null, this.nav.is_focused(), this.store.model)) {
         this.nav.focus();
       }
     });
@@ -124,13 +141,17 @@ export default class BeadsView extends View {
       if (f !== null && f.terminal === null && f.pane !== null) {
         this.own = f.pane;
       }
-      if (!this.store.model.searching && this.store.model.menu === null) {
+      if (!this.store.model.searching && this.store.model.menu === null && keysOpen === 0) {
         this.nav.focus();
       }
     });
   }
 
   dispatch(msg: Msg): void {
+    // herdr shows mods above the window only as overlays (a gpui dialog from a mod draws nothing): a copy of this mod.
+    if (msg._tag === "ShowKeys" && keysOpen === 0) {
+      this.host.openOverlay({ mod: "beads", props: { role: "keys" }, kind: "dialog", width: 460, height: 320 });
+    }
     this.store.dispatch(msg);
   }
 
@@ -168,6 +189,10 @@ export default class BeadsView extends View {
     if (this.toggle !== undefined) {
       return drawToggle(this.toggle.pane !== null, t, () => clickToggle(this.host));
     }
+    if (this.keys !== undefined) {
+      const id = this.keys;
+      return keysDialog(t, this.mono, this.nav, () => (id === null ? null : this.host.closeOverlay(id)));
+    }
     // Looked up on every draw, since the agents come and go without the Viewer being told.
     const target = pickTarget(this.store.model.opener, decodePanes(this.host.panes()), decodeAgents(this.host.agents()));
     const ui = { target, root: this.root, nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start: number, end: number) => (this.seen = [start, end]) };
@@ -178,6 +203,10 @@ export default class BeadsView extends View {
   close(_cx: AsyncContext): void {
     this.poll?.cancel();
     if (this.toggle !== undefined) {
+      return;
+    }
+    if (this.keys !== undefined) {
+      keysOpen--;
       return;
     }
     this.store.close();

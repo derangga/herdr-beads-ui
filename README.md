@@ -68,9 +68,8 @@ In the Viewer:
 | Key | Does |
 | --- | --- |
 | `j` `k` / `↓` `↑` | Move the selection |
-| `↵` | Narrow: open detail. Wide: focus the detail |
+| `↵` | Narrow: open detail |
 | `Esc` | Narrow: back to the list. Clears a focused search box |
-| `Tab` | Wide: switch focus between list and detail |
 | `/` | Focus search |
 | `[` `]` | Back and forward in the history |
 | `s` | Open the status picker for the shown bead |

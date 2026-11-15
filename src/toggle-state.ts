@@ -7,6 +7,10 @@ const text = (x: unknown): string | null => (typeof x === "string" && x !== "" ?
 const field = (o: unknown, key: string): unknown => (typeof o === "object" && o !== null ? (o as Record<string, unknown>)[key] : undefined);
 
 export const isToggle = (props: unknown): boolean => field(props, "role") === "toggle";
+// The copy herdr shows as the keys dialog (main.ts opens it with openOverlay).
+export const isKeys = (props: unknown): boolean => field(props, "role") === "keys";
+// The overlay id herdr gives a copy it shows above everything, which the copy closes itself with.
+export const overlayOf = (props: unknown): string | null => text(field(props, "overlay"));
 
 // The id of the Viewer in the focused tab, or null when that tab has none. A mod pane in panes() carries `mod` and `tab` and
 // no terminal, so decodePanes would drop it.

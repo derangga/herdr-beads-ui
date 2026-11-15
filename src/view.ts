@@ -349,25 +349,34 @@ function listColumn(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui
 
 const KEYS: [string, string][] = [
   ["j k  ↓ ↑", "Move the selection"],
-  ["↵", "Open the detail (narrow) or focus it (wide)"],
+  ["↵", "Open the detail (narrow)"],
   ["Esc", "Back to the list (narrow), clear the search, close a menu"],
-  ["Tab", "Switch focus between list and detail (wide)"],
   ["[ ]", "Back and forward in the history"],
   ["s", "Change the status of the shown bead"],
   ["y", "Copy the shown bead's id"],
   ["/", "Search"],
   ["Ctrl+R", "Refresh"],
-  ["?", "Show or hide these keys"],
+  ["?", "Show these keys"],
 ];
 
-function keysPanel(t: Theme, mono: string): Element {
+// The `?` overlay of herdr-review-annotate's TUI, drawn by the copy of the mod that herdr shows as a dialog (herdr draws
+// the frame). It holds the keyboard so Esc and ? reach it and close it.
+export function keysDialog(t: Theme, mono: string, nav: FocusHandle, close: () => void): Element {
   return v_flex()
-    .flex_1()
-    .min_h(0)
-    .p(14)
-    .gap(6)
+    .id("keys")
+    .size_full()
+    .p(16)
+    .gap(8)
+    .track_focus(nav)
+    .on_key_down((ev, cx) => {
+      if (["escape", "?", "shift-/", "shift-?"].includes(ev.keystroke)) {
+        cx.stop_propagation();
+        close();
+      }
+    })
     .text_size(12)
-    .child(div().font_semibold().child("Keys"))
+    .text_color(t.foreground)
+    .child(h_flex().pb(4).items_center().child(div().flex_1().font_semibold().child("Keys")).child(div().text_size(11).text_color(t.dim).child("Esc to close")))
     .children(KEYS.map(([k, what]) => h_flex().gap(12).child(div().w(90).flex_none().font_family(mono).text_size(11).text_color(t.accent).child(k)).child(div().flex_1().min_w(0).text_color(t.muted).child(what))));
 }
 
@@ -734,68 +743,63 @@ function detailBody(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui
 function detailPane(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui, narrow: boolean, now: number): Element {
   // One scroll area per bead, so a bead opens at its top.
   const scroll = `detail-${shownId(m) ?? "none"}`;
-  return (
-    v_flex()
-      .flex_1()
-      .min_w(0)
-      .min_h(0)
-      // Beside the list, an accent edge says which column has the keyboard.
-      .when(!narrow, (e) => e.border_l(2).border_color(m.pane === "detail" ? t.accent : t.border))
-      .child(
-        h_flex()
-          .h(36)
-          .flex_none()
-          .px(8)
-          .gap(4)
-          .items_center()
-          .border_b(1)
-          .border_color(t.border)
-          .when(narrow, (e) =>
-            e.child(
-              h_flex()
-                .id("back")
-                .h(26)
-                .pl(4)
-                .pr(8)
-                .gap(2)
-                .items_center()
-                .rounded(6)
-                .text_size(12)
-                .text_color(t.muted)
-                .cursor_pointer()
-                .hover((s) => s.bg(t.hover))
-                .active((s) => s.bg(t.selected))
-                .on_click((_e, cx) => {
-                  cx.stop_propagation();
-                  dispatch({ _tag: "BackToList" });
-                })
-                .child(svg(icon("chevron-left")).size(14).flex_none())
-                .child("List"),
-            ),
-          )
-          .child(walkButton("history-back", "‹", "Back ([)", m.back.length > 0, t, () => dispatch({ _tag: "Walk", delta: -1 })))
-          .child(walkButton("history-forward", "›", "Forward (])", m.forward.length > 0, t, () => dispatch({ _tag: "Walk", delta: 1 }))),
-      )
-      .child(
-        m.help
-          ? keysPanel(t, ui.mono)
-          : div()
-              .flex_1()
-              .min_h(0)
-              .relative()
-              .child(
-                v_flex()
-                  .id(scroll)
-                  .absolute()
-                  .inset_0()
-                  .overflow_y_scroll()
-                  .p(14)
-                  .gap(10)
-                  .children(detailBody(m, rows, t, dispatch, ui, now)),
-              )
-              .child(Scrollbar.vertical(scroll).absolute().inset_0()),
-      )
-  );
+  return v_flex()
+    .flex_1()
+    .min_w(0)
+    .min_h(0)
+    .when(!narrow, (e) => e.border_l(1).border_color(t.border))
+    .child(
+      h_flex()
+        .h(36)
+        .flex_none()
+        .px(8)
+        .gap(4)
+        .items_center()
+        .border_b(1)
+        .border_color(t.border)
+        .when(narrow, (e) =>
+          e.child(
+            h_flex()
+              .id("back")
+              .h(26)
+              .pl(4)
+              .pr(8)
+              .gap(2)
+              .items_center()
+              .rounded(6)
+              .text_size(12)
+              .text_color(t.muted)
+              .cursor_pointer()
+              .hover((s) => s.bg(t.hover))
+              .active((s) => s.bg(t.selected))
+              .on_click((_e, cx) => {
+                cx.stop_propagation();
+                dispatch({ _tag: "BackToList" });
+              })
+              .child(svg(icon("chevron-left")).size(14).flex_none())
+              .child("List"),
+          ),
+        )
+        .child(walkButton("history-back", "‹", "Back ([)", m.back.length > 0, t, () => dispatch({ _tag: "Walk", delta: -1 })))
+        .child(walkButton("history-forward", "›", "Forward (])", m.forward.length > 0, t, () => dispatch({ _tag: "Walk", delta: 1 }))),
+    )
+    .child(
+      div()
+        .flex_1()
+        .min_h(0)
+        .relative()
+        .child(
+          v_flex()
+            .id(scroll)
+            .absolute()
+            .inset_0()
+            .overflow_y_scroll()
+            .p(14)
+            .gap(10)
+            .children(detailBody(m, rows, t, dispatch, ui, now)),
+        )
+        .child(Scrollbar.vertical(scroll).absolute().inset_0()),
+    );
 }
 
 function footer(m: Model, rows: Bead[], t: Theme, wide: boolean): Element {
@@ -871,17 +875,15 @@ export function draw(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: U
     .when(empty === null && !detailFull, (e) =>
       e
         .child(
-          m.help
-            ? keysPanel(t, ui.mono)
-            : wide
-              ? h_flex()
-                  .flex_1()
-                  .min_h(0)
-                  // A row centres its children; both columns need the full height for their headers and scroll areas.
-                  .items_stretch()
-                  .child(list(m, rows, t, dispatch, ui, error, now, true).w(listWidth(m.width)).flex_none())
-                  .child(detailPane(m, rows, t, dispatch, ui, false, now))
-              : list(m, rows, t, dispatch, ui, error, now, false).flex_1(),
+          wide
+            ? h_flex()
+                .flex_1()
+                .min_h(0)
+                // A row centres its children; both columns need the full height for their headers and scroll areas.
+                .items_stretch()
+                .child(list(m, rows, t, dispatch, ui, error, now, true).w(listWidth(m.width)).flex_none())
+                .child(detailPane(m, rows, t, dispatch, ui, false, now))
+            : list(m, rows, t, dispatch, ui, error, now, false).flex_1(),
         )
         .child(footer(m, rows, t, wide)),
     );

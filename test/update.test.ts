@@ -131,7 +131,6 @@ const WIDE = { _tag: "Resized", width: 1000 } satisfies Msg;
 const NARROW = { _tag: "Resized", width: 500 } satisfies Msg;
 const ENTER = { _tag: "Enter" } satisfies Msg;
 const ESCAPE = { _tag: "Escape" } satisfies Msg;
-const TAB = { _tag: "Tab" } satisfies Msg;
 
 test("j and k move the selection through the shown rows and stop at the ends", () => {
   const m = loaded(BEADS);
@@ -154,11 +153,9 @@ test("narrow: Enter opens the detail and Esc returns to the list with the same b
   assert.equal(back.selected, "a-2");
 });
 
-test("narrow: the back button goes to the list, and Tab does nothing", () => {
+test("narrow: the back button goes to the list", () => {
   const open = steps(loaded(BEADS), NARROW, ENTER);
   assert.equal(steps(open, { _tag: "BackToList" }).pane, "list");
-  assert.equal(steps(open, TAB).pane, "detail");
-  assert.equal(steps(loaded(BEADS), NARROW, TAB).pane, "list");
 });
 
 test("narrow: a click opens the detail", () => {
@@ -166,16 +163,14 @@ test("narrow: a click opens the detail", () => {
   assert.deepEqual([m.selected, m.pane], ["a-3", "detail"]);
 });
 
-test("wide: Enter focuses the detail, Tab switches focus both ways, and Esc leaves the pane alone", () => {
-  const detail = steps(loaded(BEADS), WIDE, ENTER);
-  assert.equal(detail.pane, "detail");
-  assert.equal(steps(detail, ESCAPE).pane, "detail");
-  assert.equal(steps(detail, TAB).pane, "list");
-  assert.equal(steps(loaded(BEADS), WIDE, TAB).pane, "detail");
+test("wide: Enter and Esc keep the list, so the arrows go on moving the selection", () => {
+  const m = steps(loaded(BEADS), WIDE, ENTER, ESCAPE);
+  assert.equal(m.pane, "list");
+  assert.equal(steps(m, { _tag: "Move", delta: 1 }).selected, "a-2");
 });
 
-test("wide: a click selects and keeps the list focused", () => {
-  const m = steps(loaded(BEADS), WIDE, TAB, { _tag: "Click", id: "a-3" });
+test("wide: a click selects and keeps the list", () => {
+  const m = steps(loaded(BEADS), WIDE, { _tag: "Click", id: "a-3" });
   assert.deepEqual([m.selected, m.pane], ["a-3", "list"]);
 });
 
@@ -183,8 +178,8 @@ test("Enter with nothing selected opens nothing", () => {
   assert.equal(steps(loaded([]), NARROW, ENTER).pane, "list");
 });
 
-test("moves only act while the list has the keyboard", () => {
-  const m = steps(loaded(BEADS), WIDE, TAB, { _tag: "Move", delta: 1 });
+test("moves do nothing in the narrow detail, where the list is not shown", () => {
+  const m = steps(loaded(BEADS), NARROW, ENTER, { _tag: "Move", delta: 1 });
   assert.equal(m.selected, "a-1");
 });
 
@@ -212,14 +207,12 @@ test("/ focuses the search, Esc empties and leaves it, Enter leaves it with the 
   assert.deepEqual([cleared.searching, cleared.filters.search], [false, ""]);
 });
 
-test("Esc closes a menu, then the keys panel, before anything else", () => {
-  const m = steps(loaded(BEADS), NARROW, ENTER, { _tag: "ToggleHelp" }, { _tag: "ToggleMenu", menu: "sort" });
+test("Esc closes a menu before anything else", () => {
+  const m = steps(loaded(BEADS), NARROW, ENTER, { _tag: "ToggleMenu", menu: "sort" });
   assert.equal(m.menu, "sort");
   const noMenu = steps(m, ESCAPE);
-  assert.deepEqual([noMenu.menu, noMenu.help, noMenu.pane], [null, true, "detail"]);
-  const noHelp = steps(noMenu, ESCAPE);
-  assert.deepEqual([noHelp.help, noHelp.pane], [false, "detail"]);
-  assert.equal(steps(noHelp, ESCAPE).pane, "list");
+  assert.deepEqual([noMenu.menu, noMenu.pane], [null, "detail"]);
+  assert.equal(steps(noMenu, ESCAPE).pane, "list");
 });
 
 test("choosing from a menu closes it", () => {
@@ -233,7 +226,7 @@ test("keys are commands, except in the search box where only Esc is", () => {
   assert.deepEqual(keyFor(m, "j"), { _tag: "Move", delta: 1 });
   assert.deepEqual(keyFor(m, "up"), { _tag: "Move", delta: -1 });
   assert.deepEqual(keyFor(m, "ctrl-r"), { _tag: "Refresh" });
-  assert.deepEqual(keyFor(m, "?"), { _tag: "ToggleHelp" });
+  assert.deepEqual(keyFor(m, "?"), { _tag: "ShowKeys" });
   assert.equal(keyFor(m, "x"), null);
   const typing = { ...m, searching: true };
   assert.equal(keyFor(typing, "j"), null);
@@ -251,27 +244,8 @@ test("a thousand beads: a walk to the end lands on the last row", () => {
   assert.equal(m.selected, all[999]?.id);
 });
 
-test("while the keys panel is up, moves, Enter and Tab do nothing", () => {
-  const help = steps(loaded(BEADS), WIDE, { _tag: "ToggleHelp" });
-  assert.equal(steps(help, { _tag: "Move", delta: 1 }), help);
-  assert.equal(steps(help, ENTER), help);
-  assert.equal(steps(help, TAB), help);
-  assert.equal(steps(help, ESCAPE).help, false);
-});
-
-test("the keys panel opened in the narrow detail is closed by the next Esc, which leaves the detail on the one after", () => {
-  const m = steps(loaded(BEADS), NARROW, ENTER, { _tag: "ToggleHelp" });
-  assert.deepEqual([m.help, m.pane], [true, "detail"]);
-  assert.deepEqual([steps(m, ESCAPE).help, steps(m, ESCAPE).pane], [false, "detail"]);
-});
-
 test("Ctrl+R refreshes even in the search box or with a menu open", () => {
   const m = loaded(BEADS);
   assert.deepEqual(keyFor({ ...m, searching: true }, "ctrl-r"), { _tag: "Refresh" });
   assert.deepEqual(keyFor({ ...m, menu: "sort" }, "ctrl-r"), { _tag: "Refresh" });
-});
-
-test("the back button from the detail closes the keys panel too", () => {
-  const m = steps(loaded(BEADS), NARROW, ENTER, { _tag: "ToggleHelp" }, { _tag: "BackToList" });
-  assert.deepEqual([m.pane, m.help], ["list", false]);
 });

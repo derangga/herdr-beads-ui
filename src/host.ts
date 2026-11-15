@@ -1,5 +1,5 @@
 // The only module that imports "herdr". Everything else gets a Host, so tests swap in a FakeHost.
-import { agents, exec, focused, nextCommand, panes, props, run, settings, spaces, theme } from "herdr";
+import { agents, closeOverlay, exec, focused, nextCommand, openOverlay, panes, props, run, settings, spaces, theme } from "herdr";
 import type { AsyncContext } from "gpui-kit";
 
 export type ExecResult = { code: number; stdout: string; stderr: string };
@@ -10,6 +10,9 @@ export interface Host {
   // Mods have no setTimeout, so waiting goes through the host and a FakeHost can make it instant.
   sleep(ms: number): Promise<void>;
   run(name: string, args?: Record<string, unknown>): null;
+  // A copy of a mod above everything (kind "dialog": centred, dims the window); answers its id, which the copy gets as props().overlay.
+  openOverlay(spec: { mod: string; props?: Record<string, unknown>; kind?: "dialog"; width?: number; height?: number }): string;
+  closeOverlay(id: string): null;
   // Untrusted: decoded in decode.ts before use.
   focused(): unknown;
   panes(): unknown;
@@ -28,6 +31,8 @@ export const realHost = (cx: AsyncContext): Host => ({
   exec: (command, args, options) => exec(command, args, options),
   sleep: (ms) => cx.sleep(ms),
   run: (name, args) => run(name, args),
+  openOverlay: (spec) => openOverlay(spec),
+  closeOverlay: (id) => closeOverlay(id),
   focused: () => focused(),
   panes: () => panes(),
   agents: () => agents(),

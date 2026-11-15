@@ -11,7 +11,7 @@ import { start, takesKeyboard } from "./states.ts";
 import { Store } from "./store.ts";
 import { drawToggle } from "./toggle.ts";
 import { beadsPane, clickToggle, isKeys, isToggle, overlayOf, watchToggle } from "./toggle-state.ts";
-import type { Bead, Model, Msg } from "./types.ts";
+import type { Model, Msg } from "./types.ts";
 import { draw, keysDialog } from "./view.ts";
 
 // How soon the Viewer takes the keyboard back after losing it while herdr's focus stays on its pane: under a human's
@@ -22,17 +22,6 @@ const KEYBOARD_MS = 200;
 // and close. Unlike shared(), it is not persisted, so a quit with the dialog open cannot leave it stuck.
 let keysOpen = 0;
 
-// The visible rows again only when what they are built from changed: a hover, a resize or a key that moves nothing redraws without a filter and a sort.
-function rowsCache(): (m: Model) => Bead[] {
-  let last: { snapshot: Model["snapshot"]; filters: Model["filters"]; sort: Model["sort"]; rows: Bead[] } | null = null;
-  return (m) => {
-    if (last === null || last.snapshot !== m.snapshot || last.filters !== m.filters || last.sort !== m.sort) {
-      last = { snapshot: m.snapshot, filters: m.filters, sort: m.sort, rows: visible(m) };
-    }
-    return last.rows;
-  };
-}
-
 export default class BeadsView extends View {
   store!: Store;
   root: string | null = null;
@@ -42,7 +31,6 @@ export default class BeadsView extends View {
   search!: InputState;
   reason!: InputState;
   scroll!: VirtualListScrollHandle;
-  rows = rowsCache();
   // The rows the list drew last, [start, end): what is on screen, which the model does not know.
   seen: [number, number] | null = null;
   mono = "";
@@ -178,7 +166,7 @@ export default class BeadsView extends View {
     }
     // After every change, since a sort, a filter or a reload moves the selected row without changing which bead is selected.
     // Only a row off screen scrolls: the default pins it to the nearest edge, so scrolling a visible one would jump it.
-    const at = this.rows(model).findIndex((b) => b.id === model.selected);
+    const at = visible(model).findIndex((b) => b.id === model.selected);
     if (at >= 0 && (this.seen === null || at < this.seen[0] || at >= this.seen[1])) {
       this.scroll.scroll_to_item(at);
     }
@@ -196,7 +184,7 @@ export default class BeadsView extends View {
     // Looked up on every draw, since the agents come and go without the Viewer being told.
     const target = pickTarget(this.store.model.opener, decodePanes(this.host.panes()), decodeAgents(this.host.agents()));
     const ui = { target, root: this.root, nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start: number, end: number) => (this.seen = [start, end]) };
-    return draw(this.store.model, this.rows(this.store.model), t, (msg) => this.dispatch(msg), ui, Date.now());
+    return draw(this.store.model, visible(this.store.model), t, (msg) => this.dispatch(msg), ui, Date.now());
   }
 
   // Bounded: set the flag and let the replies in flight be dropped.

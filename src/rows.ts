@@ -46,9 +46,17 @@ export function matches(b: Bead, f: Filters, ready: Set<string>): boolean {
   return (f.status === ALL || (f.status === NOT_CLOSED ? b.status !== "closed" : b.status === f.status)) && (f.type === ALL || b.issue_type === f.type) && (!f.ready || ready.has(b.id)) && (needle === "" || b.id.toLowerCase().includes(needle) || b.title.toLowerCase().includes(needle));
 }
 
+// The rows again only when what they are built from changed (the reducer keeps the same objects until they do), so a key that moves nothing
+// and a redraw run no filter and sort. Callers must not mutate the result. Two Viewers share the module and may evict each other's entry:
+// that costs a recompute, never a wrong answer.
+let last: { snapshot: Model["snapshot"]; filters: Model["filters"]; sort: Model["sort"]; rows: Bead[] } | null = null;
+
 export function visible(m: Model): Bead[] {
-  const s = m.snapshot;
-  return s === null ? [] : s.beads.filter((b) => matches(b, m.filters, s.ready)).sort(compare(m.sort));
+  if (last === null || last.snapshot !== m.snapshot || last.filters !== m.filters || last.sort !== m.sort) {
+    const s = m.snapshot;
+    last = { snapshot: s, filters: m.filters, sort: m.sort, rows: s === null ? [] : s.beads.filter((b) => matches(b, m.filters, s.ready)).sort(compare(m.sort)) };
+  }
+  return last.rows;
 }
 
 // The selected bead stays while it is still shown, else the first row takes over.
@@ -74,7 +82,11 @@ export function treeRows(nodes: TreeNode[]): TreeRow[] {
   const kids = new Map<string, TreeNode[]>();
   for (const n of nodes) {
     if (n.depth > 0) {
-      kids.set(n.parent_id, [...(kids.get(n.parent_id) ?? []), n]);
+      const list = kids.get(n.parent_id) ?? [];
+      if (list.length === 0) {
+        kids.set(n.parent_id, list);
+      }
+      list.push(n);
     }
   }
   const rows: TreeRow[] = [];
@@ -120,10 +132,18 @@ export function statusOptions(m: Model): string[] {
   return [NOT_CLOSED, ALL, ...BUILT_IN_STATUSES, ...[...custom].sort()];
 }
 
+// One id index per snapshot, built on first use and dropped with the snapshot.
+const indexes = new WeakMap<Snapshot, Map<string, BeadDetail>>();
+const byIdOf = (s: Snapshot): Map<string, BeadDetail> => {
+  const found = indexes.get(s) ?? new Map(s.beads.map((b) => [b.id, b]));
+  indexes.set(s, found);
+  return found;
+};
+
 // The shown bead: the load's own copy, so showing one runs no bd. Null when the id is not in it.
 export function shownBead(m: Model): BeadDetail | null {
   const id = shownId(m);
-  return id === null ? null : (m.snapshot?.beads.find((b) => b.id === id) ?? null);
+  return id === null || m.snapshot === null ? null : (byIdOf(m.snapshot).get(id) ?? null);
 }
 
 const MAX_DEPTH = 50;
@@ -132,7 +152,7 @@ const MAX_DEPTH = 50;
 // follows what the bead depends on, "up" what depends on it, every edge type but relates-to, siblings in edge order. Like bd, every id comes
 // out once, in a depth-first walk with one seen set: an edge to an id already emitted, the root included, is dropped.
 export function depTree(s: Snapshot, id: string, direction: Direction): TreeNode[] {
-  const byId = new Map(s.beads.map((b) => [b.id, b]));
+  const byId = byIdOf(s);
   const root = byId.get(id);
   if (root === undefined) {
     return [];
@@ -141,7 +161,11 @@ export function depTree(s: Snapshot, id: string, direction: Direction): TreeNode
   const out = new Map<string, { id: string; type: string }[]>();
   // relates-to is bd's two-way "see also" link, which bd dep tree does not follow either.
   for (const e of s.edges.filter((e) => e.type !== "relates-to")) {
-    out.set(e[near], [...(out.get(e[near]) ?? []), { id: e[far], type: e.type }]);
+    const list = out.get(e[near]) ?? [];
+    if (list.length === 0) {
+      out.set(e[near], list);
+    }
+    list.push({ id: e[far], type: e.type });
   }
   const node = (b: Bead, depth: number, parent_id: string, edge: string | null): TreeNode => ({ id: b.id, title: b.title, status: b.status, priority: b.priority, issue_type: b.issue_type, depth, parent_id, edge_from_parent: edge });
   const nodes = [node(root, 0, "", null)];

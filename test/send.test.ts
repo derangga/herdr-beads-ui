@@ -53,6 +53,17 @@ test("send: the prompt is pasted once the agent has focus, and the old text come
   assert.deepEqual(events, ["clipboard Work on bead a-1: Fix it", 'run pane.focus {"terminal":"t2"}', "sleep 50", "run terminal.paste {}", "sleep 300", "clipboard old text"]);
 });
 
+test("send: a title with line breaks and tabs is pasted as one line", async () => {
+  const { host, events } = fakeHost(() => exit(""), {
+    panes: () => hostShaped(panes),
+    agents: () => hostShaped(agents),
+    readClipboard: () => "old text",
+    focused: () => focus("t2"),
+  });
+  await run(host, "/r", { ...SEND, title: "line one\nrm -rf ~/x\r\n\tend" });
+  assert.equal(events[0], "clipboard Work on bead a-1: line one rm -rf ~/x end");
+});
+
 test("send: focus that never lands pastes nothing, restores the clipboard and says the agent is gone", async () => {
   const { host, events } = fakeHost(() => exit(""), { panes: () => hostShaped(panes), agents: () => hostShaped(agents), readClipboard: () => "old text", focused: () => focus("t1") });
   const msg = await run(host, "/r", SEND);

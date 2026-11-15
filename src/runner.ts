@@ -5,7 +5,8 @@ import { pickTarget } from "./rows.ts";
 import type { BdError, Cmd, Msg, Res } from "./types.ts";
 
 const BD_TIMEOUT_MS = 15_000;
-// Another bd process can hold the database for a moment, so a locked or slow call is tried twice more.
+// Another bd process can hold the database for a moment, so a locked call is tried twice more.
+// A timeout is not retried: 15 s already means bd is stuck, and retrying would hold the spinner for ~46 s.
 const RETRY_DELAYS_MS = [300, 900];
 // A first load still running this long shows "Loading", so a fast bd never flashes it.
 export const WAIT_LOAD_MS = 150;
@@ -79,7 +80,7 @@ async function once(host: Host, root: string, args: string[]): Promise<Res<strin
 export async function bd(host: Host, root: string, args: string[]): Promise<Res<string>> {
   let res = await once(host, root, args);
   for (const delay of RETRY_DELAYS_MS) {
-    if (res.ok || (res.error._tag !== "BdLocked" && res.error._tag !== "BdTimeout")) {
+    if (res.ok || res.error._tag !== "BdLocked") {
       break;
     }
     await host.sleep(delay);
@@ -144,7 +145,7 @@ async function send(host: Host, { id, title, opener }: Extract<Cmd, { _tag: "Sen
     }
   };
   try {
-    host.writeClipboard(`Work on bead ${id}: ${title}`);
+    host.writeClipboard(`Work on bead ${id}: ${title.replace(/\s+/g, " ").trim()}`);
     host.run("pane.focus", { terminal: target.terminal });
     // terminal.paste goes to whatever has the keyboard, so nothing is pasted until the target is seen to have it.
     for (let i = 0; decodeFocus(host.focused())?.terminal !== target.terminal; i++) {

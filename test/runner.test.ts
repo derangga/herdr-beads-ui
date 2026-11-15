@@ -62,12 +62,12 @@ test("BdRejected: the same rejection when bd starts without the folder means the
   assert.deepEqual(res, { ok: false, error: { _tag: "BdRejected", code: -1, text: NO_BIN.message } });
 });
 
-test("BdTimeout: exec rejects with its timeout text, retried twice", async () => {
+test("BdTimeout: exec rejects with its timeout text, not retried", async () => {
   const { host, calls, sleeps } = fakeHost(() => SLOW);
   const res = await exportBeads(host, ROOT);
   assert.deepEqual(res, { ok: false, error: { _tag: "BdTimeout", text: SLOW.message } });
-  assert.equal(calls.length, 3);
-  assert.deepEqual(sleeps, [300, 900]);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(sleeps, []);
 });
 
 const LOCK = "a maintenance operation is running on this workspace; retry when it completes: workspacegate: /r/.beads/embeddeddolt.gate.lock (shared mode) held by another bd process (no holder info recorded): workspace gate busy";

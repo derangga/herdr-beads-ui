@@ -216,9 +216,13 @@ function matches(b, f, ready) {
   const needle = f.search.trim().toLowerCase();
   return (f.status === ALL || (f.status === NOT_CLOSED ? b.status !== "closed" : b.status === f.status)) && (f.type === ALL || b.issue_type === f.type) && (!f.ready || ready.has(b.id)) && (needle === "" || b.id.toLowerCase().includes(needle) || b.title.toLowerCase().includes(needle));
 }
+var last = null;
 function visible(m) {
-  const s = m.snapshot;
-  return s === null ? [] : s.beads.filter((b) => matches(b, m.filters, s.ready)).sort(compare(m.sort));
+  if (last === null || last.snapshot !== m.snapshot || last.filters !== m.filters || last.sort !== m.sort) {
+    const s = m.snapshot;
+    last = { snapshot: s, filters: m.filters, sort: m.sort, rows: s === null ? [] : s.beads.filter((b) => matches(b, m.filters, s.ready)).sort(compare(m.sort)) };
+  }
+  return last.rows;
 }
 function reselect(m) {
   const rows = visible(m);
@@ -233,16 +237,20 @@ function treeRows(nodes) {
   const kids = /* @__PURE__ */ new Map();
   for (const n of nodes) {
     if (n.depth > 0) {
-      kids.set(n.parent_id, [...kids.get(n.parent_id) ?? [], n]);
+      const list2 = kids.get(n.parent_id) ?? [];
+      if (list2.length === 0) {
+        kids.set(n.parent_id, list2);
+      }
+      list2.push(n);
     }
   }
   const rows = [];
   const walk = (parent, guides) => {
     const list2 = kids.get(parent) ?? [];
     list2.forEach((n, i) => {
-      const last = i === list2.length - 1;
-      rows.push({ id: n.id, title: n.title, status: n.status, edge: n.edge_from_parent ?? "", depth: guides.length + 1, guides, last });
-      walk(n.id, [...guides, !last]);
+      const last2 = i === list2.length - 1;
+      rows.push({ id: n.id, title: n.title, status: n.status, edge: n.edge_from_parent ?? "", depth: guides.length + 1, guides, last: last2 });
+      walk(n.id, [...guides, !last2]);
     });
   };
   nodes.filter((n) => n.depth === 0).forEach((r) => walk(r.id, []));
@@ -265,13 +273,19 @@ function statusOptions(m) {
   const custom = new Set((m.snapshot?.beads ?? []).map((b) => b.status).filter((s) => !BUILT_IN_STATUSES.includes(s)));
   return [NOT_CLOSED, ALL, ...BUILT_IN_STATUSES, ...[...custom].sort()];
 }
+var indexes = /* @__PURE__ */ new WeakMap();
+var byIdOf = (s) => {
+  const found = indexes.get(s) ?? new Map(s.beads.map((b) => [b.id, b]));
+  indexes.set(s, found);
+  return found;
+};
 function shownBead(m) {
   const id = shownId(m);
-  return id === null ? null : m.snapshot?.beads.find((b) => b.id === id) ?? null;
+  return id === null || m.snapshot === null ? null : byIdOf(m.snapshot).get(id) ?? null;
 }
 var MAX_DEPTH = 50;
 function depTree(s, id, direction) {
-  const byId = new Map(s.beads.map((b) => [b.id, b]));
+  const byId = byIdOf(s);
   const root = byId.get(id);
   if (root === void 0) {
     return [];
@@ -279,7 +293,11 @@ function depTree(s, id, direction) {
   const [near, far] = direction === "down" ? ["from", "to"] : ["to", "from"];
   const out = /* @__PURE__ */ new Map();
   for (const e of s.edges.filter((e2) => e2.type !== "relates-to")) {
-    out.set(e[near], [...out.get(e[near]) ?? [], { id: e[far], type: e.type }]);
+    const list2 = out.get(e[near]) ?? [];
+    if (list2.length === 0) {
+      out.set(e[near], list2);
+    }
+    list2.push({ id: e[far], type: e.type });
   }
   const node = (b, depth, parent_id, edge) => ({ id: b.id, title: b.title, status: b.status, priority: b.priority, issue_type: b.issue_type, depth, parent_id, edge_from_parent: edge });
   const nodes = [node(root, 0, "", null)];
@@ -645,7 +663,7 @@ async function once(host, root, args) {
 async function bd(host, root, args) {
   let res = await once(host, root, args);
   for (const delay of RETRY_DELAYS_MS) {
-    if (res.ok || res.error._tag !== "BdLocked" && res.error._tag !== "BdTimeout") {
+    if (res.ok || res.error._tag !== "BdLocked") {
       break;
     }
     await host.sleep(delay);
@@ -698,7 +716,7 @@ async function send(host, { id, title, opener }) {
     }
   };
   try {
-    host.writeClipboard(`Work on bead ${id}: ${title}`);
+    host.writeClipboard(`Work on bead ${id}: ${title.replace(/\s+/g, " ").trim()}`);
     host.run("pane.focus", { terminal: target.terminal });
     for (let i = 0; decodeFocus(host.focused())?.terminal !== target.terminal; i++) {
       if (i === FOCUS_POLLS) {
@@ -1185,15 +1203,6 @@ function list(m, rows, t, dispatch, ui, error, now, wide) {
 // src/main.ts
 var KEYBOARD_MS = 200;
 var keysOpen = 0;
-function rowsCache() {
-  let last = null;
-  return (m) => {
-    if (last === null || last.snapshot !== m.snapshot || last.filters !== m.filters || last.sort !== m.sort) {
-      last = { snapshot: m.snapshot, filters: m.filters, sort: m.sort, rows: visible(m) };
-    }
-    return last.rows;
-  };
-}
 var BeadsView = class extends View {
   store;
   root = null;
@@ -1203,7 +1212,6 @@ var BeadsView = class extends View {
   search;
   reason;
   scroll;
-  rows = rowsCache();
   // The rows the list drew last, [start, end): what is on screen, which the model does not know.
   seen = null;
   mono = "";
@@ -1321,7 +1329,7 @@ var BeadsView = class extends View {
     if (before.pane === "detail" && model.pane === "list") {
       this.seen = null;
     }
-    const at = this.rows(model).findIndex((b) => b.id === model.selected);
+    const at = visible(model).findIndex((b) => b.id === model.selected);
     if (at >= 0 && (this.seen === null || at < this.seen[0] || at >= this.seen[1])) {
       this.scroll.scroll_to_item(at);
     }
@@ -1337,7 +1345,7 @@ var BeadsView = class extends View {
     }
     const target = pickTarget(this.store.model.opener, decodePanes(this.host.panes()), decodeAgents(this.host.agents()));
     const ui = { target, root: this.root, nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start2, end) => this.seen = [start2, end] };
-    return draw(this.store.model, this.rows(this.store.model), t, (msg) => this.dispatch(msg), ui, Date.now());
+    return draw(this.store.model, visible(this.store.model), t, (msg) => this.dispatch(msg), ui, Date.now());
   }
   // Bounded: set the flag and let the replies in flight be dropped.
   close(_cx) {

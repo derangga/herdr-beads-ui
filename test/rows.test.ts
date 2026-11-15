@@ -163,3 +163,12 @@ for (const [key, tied, other] of TIES) {
     assert.deepEqual(sorted(key, true, beads), ["o-1", "x-3", "x-1", "x-2"]);
   });
 }
+
+test("the same snapshot, filters and sort give the same rows; new filters give new rows", () => {
+  const m = model();
+  assert.equal(visible(m), visible(m));
+  const all = { ...m, filters: { ...m.filters, status: "all" } };
+  assert.notEqual(visible(all), visible(m));
+  assert.deepEqual(ids(all), ["a-2", "a-3", "a-1", "b-4", "a-5"]);
+  assert.deepEqual(ids(m), ["a-2", "a-3", "a-1", "b-4"]);
+});

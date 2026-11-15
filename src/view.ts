@@ -5,14 +5,15 @@ import type { Element, FocusHandle } from "gpui-kit";
 import { h_flex, Input, Popup, Scrollbar, TextView, v_flex } from "gpui-base";
 import type { InputState, VirtualListScrollHandle } from "gpui-base";
 import { age, ALL, fullDate, hiddenByFilters, idChars, isWide, keyFor, listWidth, NO_AGE_BELOW, NOT_CLOSED, pickOptions, ROW_H, shownBead, shownId, SORT_KEYS, statusOptions, textSections, treeRows, typeOptions } from "./rows.ts";
+import { bdText, emptyState, retryLabel } from "./states.ts";
 import type { BdError, Bead, BeadDetail, Detail, Menu, Model, Msg, Part, PartName, Target, TreeNode, TreeRow } from "./types.ts";
 
 export type Theme = Record<string, `#${string}`>;
 type Dispatch = (msg: Msg) => void;
 // What the view owns and the model must not hold: the focus target keys reach, the search box, the close reason's box, the list's
-// scroll position, the id font, the agent Send to agent would type into, and `seen`, which hears the rows the list just drew so the
+// scroll position, the id font, the Viewed repo, the agent Send to agent would type into, and `seen`, which hears the rows the list just drew so the
 // owner can tell whether a row is on screen.
-export type Ui = { target: Target | null; nav: FocusHandle; search: InputState; reason: InputState; scroll: VirtualListScrollHandle; mono: string; seen: (start: number, end: number) => void };
+export type Ui = { target: Target | null; root: string | null; nav: FocusHandle; search: InputState; reason: InputState; scroll: VirtualListScrollHandle; mono: string; seen: (start: number, end: number) => void };
 
 const icon = (name: string): string => `mods/beads/icons/${name}.svg`;
 
@@ -133,16 +134,28 @@ function walkButton(id: string, glyph: string, tip: string, on: boolean, t: Them
 
 const SORT_LABEL = (key: string): string => key.charAt(0).toUpperCase() + key.slice(1);
 
-// Input.new is already a framed editor, so nothing draws a border around it.
-function searchBox(ui: Ui): Element {
+// Framed as herdr-review's filter: the edge lights while typing, and the count of shown beads sits inside on the right.
+function searchBox(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui): Element {
+  const count = m.snapshot === null ? "" : `${rows.length}/${m.snapshot.beads.length}`;
   return (
-    div()
+    h_flex()
       .id("search")
       .flex_1()
       .min_w(120)
+      .h(30)
+      .px(8)
+      .gap(6)
+      .items_center()
+      .rounded(7)
+      .border_1()
+      .border_color(m.searching ? t.accent : t.border)
+      .cursor_text()
       // A press in the box is the box's own: it must not hand the keyboard to the Viewer behind it.
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .child(Input.new(ui.search).h(26).w_full().text_size(12))
+      // The whole frame is the target, not only the text line inside it.
+      .on_click(() => dispatch({ _tag: "FocusSearch" }))
+      .child(div().flex_1().min_w(0).child(Input.new(ui.search).h_full().w_full().text_size(12)))
+      .child(div().flex_none().text_size(10).text_color(t.dim).child(count))
   );
 }
 
@@ -196,31 +209,30 @@ function filters(m: Model, t: Theme, dispatch: Dispatch, narrow: boolean): Eleme
   ];
 }
 
-function topBar(m: Model, t: Theme, dispatch: Dispatch, ui: Ui, wide: boolean): Element {
+// The list's own toolbar, at the top of the list column in both widths: what it filters sits right above it, and the
+// detail beside it keeps the full height. The short sort label is for a column too narrow for "Sort: Priority".
+function topBar(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui, short: boolean): Element {
   const refresh = iconButton("refresh", "refresh", "Refresh (Ctrl+R)", t, () => dispatch({ _tag: "Refresh" }), m.loading);
   return v_flex()
     .flex_none()
+    .px(8)
+    .pt(8)
+    .pb(6)
+    .gap(6)
     .border_b(1)
     .border_color(t.border)
     .child(
       h_flex()
-        .px(8)
-        .py(6)
         .gap(6)
         .items_center()
-        .child(searchBox(ui))
-        .when(wide, (e) => e.children(filters(m, t, dispatch, false)))
+        .child(searchBox(m, rows, t, dispatch, ui))
         .child(refresh),
     )
-    .when(!wide, (e) =>
-      e.child(
-        h_flex()
-          .px(8)
-          .pb(6)
-          .gap(6)
-          .items_center()
-          .children(filters(m, t, dispatch, true)),
-      ),
+    .child(
+      h_flex()
+        .gap(6)
+        .items_center()
+        .children(filters(m, t, dispatch, short)),
     );
 }
 
@@ -306,7 +318,17 @@ function listColumn(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui
         ? div()
             .p(14)
             .text_color(t.muted)
-            .child(m.snapshot === null ? (m.loading ? "Loading beads..." : "") : "No beads match")
+            .child(
+              m.snapshot === null
+                ? m.slow
+                  ? h_flex()
+                      .gap(8)
+                      .items_center()
+                      .child(svg(icon("refresh")).size(14).flex_none().spin(900))
+                      .child("Loading beads")
+                  : ""
+                : "No beads match",
+            )
         : // Only the rows on screen are built, so a thousand beads cost what twenty do.
           uniform_list(
             "beads-list",
@@ -348,8 +370,6 @@ function keysPanel(t: Theme, mono: string): Element {
     .child(div().font_semibold().child("Keys"))
     .children(KEYS.map(([k, what]) => h_flex().gap(12).child(div().w(90).flex_none().font_family(mono).text_size(11).text_color(t.accent).child(k)).child(div().flex_1().min_w(0).text_color(t.muted).child(what))));
 }
-
-const bdText = (e: BdError): string => ("text" in e ? e.text : `bd ${e.version ?? "(version unknown)"} gave output this viewer does not understand: ${e.path} ${e.detail}`);
 
 const heading = (label: string, t: Theme): Element => div().text_size(11).font_semibold().text_color(t.muted).child(label.toUpperCase());
 
@@ -780,7 +800,8 @@ function detailPane(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui
 
 function footer(m: Model, rows: Bead[], t: Theme, wide: boolean): Element {
   const s = m.snapshot;
-  const counts = s === null ? "" : wide ? `${rows.length} of ${s.beads.length} · ${s.ready.size} ready` : `${rows.length} of ${s.beads.length}`;
+  // Shown of total is in the search box; the footer keeps what the box does not say.
+  const counts = s === null ? "" : `${s.ready.size} ready`;
   return h_flex()
     .h(26)
     .flex_none()
@@ -799,12 +820,35 @@ function footer(m: Model, rows: Bead[], t: Theme, wide: boolean): Element {
     );
 }
 
+// A message in the middle of the Viewer, for when there is no list to draw.
+function emptyView(title: string, hint: string | null, retry: boolean, loading: boolean, t: Theme, dispatch: Dispatch): Element {
+  return v_flex()
+    .flex_1()
+    .min_h(0)
+    .p(14)
+    .gap(8)
+    .items_center()
+    .justify_center()
+    .text_center()
+    .child(div().text_color(t.muted).child(title))
+    .when(hint !== null, (e) =>
+      e.child(
+        div()
+          .text_size(12)
+          .text_color(t.dim)
+          .child(hint ?? ""),
+      ),
+    )
+    .when(retry, (e) => e.child(button("retry-load", retryLabel(loading), false, t, () => dispatch({ _tag: "Refresh" })).opacity(loading ? 0.6 : 1)));
+}
+
 const errorText = (m: Model): string | null => (m.error === null ? null : bdText(m.error));
 
 export function draw(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui, now: number): Element {
   const wide = isWide(m);
   const detailFull = !wide && m.pane === "detail";
   const error = errorText(m);
+  const empty = emptyState(m, ui.root);
   return v_flex()
     .id("beads")
     .size_full()
@@ -822,21 +866,10 @@ export function draw(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: U
         cx.stop_propagation();
       }
     })
-    .when(detailFull, (e) => e.child(detailPane(m, rows, t, dispatch, ui, true, now)))
-    .when(!detailFull, (e) =>
+    .when(empty !== null, (e) => e.child(emptyView(empty?.title ?? "", empty?.hint ?? null, empty?.retry ?? false, m.loading, t, dispatch)))
+    .when(empty === null && detailFull, (e) => e.child(detailPane(m, rows, t, dispatch, ui, true, now)))
+    .when(empty === null && !detailFull, (e) =>
       e
-        .child(topBar(m, t, dispatch, ui, wide))
-        .when(error !== null, (x) =>
-          x.child(
-            div()
-              .px(12)
-              .py(6)
-              .flex_none()
-              .text_size(12)
-              .text_color(pick(t, "red", "ansi1"))
-              .child(error ?? ""),
-          ),
-        )
         .child(
           m.help
             ? keysPanel(t, ui.mono)
@@ -844,16 +877,39 @@ export function draw(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: U
               ? h_flex()
                   .flex_1()
                   .min_h(0)
-                  .child(
-                    v_flex()
-                      .w(listWidth(m.width))
-                      .h_full()
-                      .flex_none()
-                      .child(listColumn(m, rows, t, dispatch, ui, false, now)),
-                  )
+                  // A row centres its children; both columns need the full height for their headers and scroll areas.
+                  .items_stretch()
+                  .child(list(m, rows, t, dispatch, ui, error, now, true).w(listWidth(m.width)).flex_none())
                   .child(detailPane(m, rows, t, dispatch, ui, false, now))
-              : listColumn(m, rows, t, dispatch, ui, true, now),
+              : list(m, rows, t, dispatch, ui, error, now, false).flex_1(),
         )
         .child(footer(m, rows, t, wide)),
     );
+}
+
+// The list column: its toolbar, bd's error with Retry while the last good list stays under it, then the rows.
+function list(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui, error: string | null, now: number, wide: boolean): Element {
+  return v_flex()
+    .min_h(0)
+    .child(topBar(m, rows, t, dispatch, ui, !wide || listWidth(m.width) < 480))
+    .when(error !== null, (x) =>
+      x.child(
+        h_flex()
+          .px(12)
+          .py(6)
+          .gap(8)
+          .items_center()
+          .flex_none()
+          .text_size(12)
+          .child(
+            div()
+              .flex_1()
+              .min_w(0)
+              .text_color(pick(t, "red", "ansi1"))
+              .child(error ?? ""),
+          )
+          .child(button("retry-load", "Retry", false, t, () => dispatch({ _tag: "Refresh" }))),
+      ),
+    )
+    .child(listColumn(m, rows, t, dispatch, ui, !wide, now));
 }

@@ -185,6 +185,9 @@ export async function run(host: Host, root: string, cmd: Cmd): Promise<Msg> {
       const locks = new Map(blocked.value.map((b) => [b.id, b.blocked_by_count]));
       return { _tag: "Loaded", res: { ok: true, value: { beads: beads.value, ready: new Set(ready.value), locks } } };
     }
+    case "WaitLoad":
+      await host.sleep(WAIT_MS.loading);
+      return { _tag: "Slowed", n: cmd.n };
     case "Fetch":
       switch (cmd.part) {
         case "show":

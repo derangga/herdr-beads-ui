@@ -1,5 +1,5 @@
 // src/main.ts
-import { View, div as div2 } from "gpui-kit";
+import { View } from "gpui-kit";
 import { InputState, VirtualListScrollHandle } from "gpui-base";
 
 // src/decode.ts
@@ -42,11 +42,11 @@ function strings(o, k, path) {
 }
 var each = (o, k, path, item) => arr(o[k], `${path}.${k}`).map((x, i) => item(obj(x, `${path}.${k}[${i}]`), `${path}.${k}[${i}]`));
 function decoder(read) {
-  return (text2, version) => {
+  return (text3, version) => {
     const fail2 = (path, detail2) => ({ ok: false, error: { _tag: "Undecodable", version, path, detail: detail2 } });
     let json;
     try {
-      json = JSON.parse(text2);
+      json = JSON.parse(text3);
     } catch {
       return fail2("$", "not JSON");
     }
@@ -136,12 +136,13 @@ function decodeFocus(v) {
     return null;
   }
   const o = v;
-  return { cwd: typeof o.cwd === "string" ? o.cwd : null, terminal: typeof o.terminal === "string" ? o.terminal : null, tab: typeof o.tab === "string" ? o.tab : null };
+  const text3 = (x) => typeof x === "string" ? x : null;
+  return { cwd: text3(o.cwd), terminal: text3(o.terminal), tab: text3(o.tab), pane: text3(o.pane) };
 }
 function decodeProps(v) {
   const o = typeof v === "object" && v !== null ? v : {};
-  const text2 = (x) => typeof x === "string" && x !== "" ? x : null;
-  return { root: text2(o.root), opener: text2(o.opener) };
+  const text3 = (x) => typeof x === "string" && x !== "" ? x : null;
+  return { root: text3(o.root), opener: text3(o.opener) };
 }
 var records = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "object" && x !== null) : [];
 var name = (o) => {
@@ -153,6 +154,9 @@ function decodePanes(v) {
 }
 function decodeAgents(v) {
   return records(v).flatMap((o) => typeof o.pane === "string" && typeof o.tab === "string" && typeof o.seq === "number" ? [{ pane: o.pane, tab: o.tab, seq: o.seq, name: name(o) }] : []);
+}
+function isRemoteTab(spaces2, tab) {
+  return tab !== null && records(spaces2).some((o) => typeof o.machine === "string" && o.machine !== "" && records(o.tabs).some((t) => t.id === tab));
 }
 var FALLBACK_MONO = "Menlo";
 function decodeFont(v) {
@@ -176,7 +180,7 @@ var realHost = (cx) => ({
   // The setters want `#${string}` and theme() says string: the one cast.
   theme: () => theme(),
   readClipboard: () => cx.read_from_clipboard(),
-  writeClipboard: (text2) => cx.write_to_clipboard(text2)
+  writeClipboard: (text3) => cx.write_to_clipboard(text3)
 });
 
 // src/rows.ts
@@ -239,9 +243,9 @@ function treeRows(nodes) {
   const seen = new Set(roots.map((n) => n.id));
   const rows = [];
   const walk = (parent, guides) => {
-    const list = kids.get(parent) ?? [];
-    list.forEach((n, i) => {
-      const [last, repeat] = [i === list.length - 1, seen.has(n.id)];
+    const list2 = kids.get(parent) ?? [];
+    list2.forEach((n, i) => {
+      const [last, repeat] = [i === list2.length - 1, seen.has(n.id)];
       seen.add(n.id);
       rows.push({ id: n.id, title: n.title, status: n.status, edge: n.edge_from_parent ?? "", depth: guides.length + 1, guides, last, repeat });
       if (!repeat) {
@@ -257,7 +261,7 @@ var textSections = (d) => [
   ["Design", d.design],
   ["Acceptance criteria", d.acceptance_criteria],
   ["Notes", d.notes]
-].filter(([, text2]) => text2.trim() !== "");
+].filter(([, text3]) => text3.trim() !== "");
 var WIDE_AT = 800;
 var NO_AGE_BELOW = 480;
 var ROW_H = 28;
@@ -359,185 +363,12 @@ function keyFor(m, keystroke) {
   }
 }
 
-// src/runner.ts
-var BD_TIMEOUT_MS = 15e3;
-var RETRY_DELAYS_MS = [300, 900];
-var WAIT_MS = { fetch: 120, loading: 150 };
-var FADE_MS = 1200;
-var FOCUS_POLL_MS = 50;
-var FOCUS_POLLS = 30;
-var PASTE_MS = 300;
-var fail = (error) => ({ ok: false, error });
-function errorText({ stdout, stderr }) {
-  let out = stdout.trim();
-  try {
-    const message = JSON.parse(stdout).error;
-    out = typeof message === "string" ? message : out;
-  } catch {
-  }
-  return [stderr.trim(), out].filter((part) => part !== "").join("\n");
-}
-function classify(result) {
-  const text2 = errorText(result);
-  if (text2.includes("no beads database found")) {
-    return { _tag: "NoDatabase", text: text2 };
-  }
-  if (text2.includes("maintenance operation is running")) {
-    return { _tag: "BdLocked", text: text2 };
-  }
-  if (/^Issue \S+ not found/m.test(text2) || /no issues? found matching/.test(text2)) {
-    return { _tag: "BeadGone", text: text2 };
-  }
-  return { _tag: "BdRejected", code: result.code, text: text2 };
-}
-async function rejection(host, text2) {
-  if (/took longer than .* and was stopped/.test(text2)) {
-    return { _tag: "BdTimeout", text: text2 };
-  }
-  if (!text2.includes("cannot run ")) {
-    return { _tag: "BdRejected", code: -1, text: text2 };
-  }
-  const bdStarts = await host.exec("bd", ["--version"], { timeout: BD_TIMEOUT_MS }).then(
-    () => true,
-    () => false
-  );
-  return bdStarts ? { _tag: "BdRejected", code: -1, text: text2 } : { _tag: "BdMissing", text: text2 };
-}
-async function once(host, root, args) {
-  let result;
-  try {
-    result = await host.exec("bd", args, { cwd: root, timeout: BD_TIMEOUT_MS });
-  } catch (e) {
-    return fail(await rejection(host, e instanceof Error ? e.message : String(e)));
-  }
-  return result.code === 0 ? { ok: true, value: result.stdout } : fail(classify(result));
-}
-async function bd(host, root, args) {
-  let res = await once(host, root, args);
-  for (const delay of RETRY_DELAYS_MS) {
-    if (res.ok || res.error._tag !== "BdLocked" && res.error._tag !== "BdTimeout") {
-      break;
-    }
-    await host.sleep(delay);
-    res = await once(host, root, args);
-  }
-  return res;
-}
-async function bdVersion(host, root) {
-  const res = await once(host, root, ["--version"]);
-  return res.ok ? res.value.match(/\d+\.\d+\.\d+\S*/)?.[0] ?? null : null;
-}
-async function bdJson(host, root, args, decode) {
-  const out = await bd(host, root, args);
-  if (!out.ok) {
-    return out;
-  }
-  const res = decode(out.value, null);
-  if (res.ok || res.error._tag !== "Undecodable") {
-    return res;
-  }
-  return decode(out.value, await bdVersion(host, root));
-}
-var listBeads = (host, root) => bdJson(host, root, ["list", "--all", "-n", "0", "--brief", "--json"], decodeList);
-var readyIds = (host, root) => bdJson(host, root, ["ready", "-n", "0", "--json"], decodeReady);
-var blockedBeads = (host, root) => bdJson(host, root, ["blocked", "--json"], decodeBlocked);
-var showBead = (host, root, id) => bdJson(host, root, ["show", id, "--json"], decodeShow);
-var depTree = (host, root, id, direction) => bdJson(host, root, ["dep", "tree", id, `--direction=${direction}`, "--json"], decodeTree);
-var beadComments = (host, root, id) => bdJson(host, root, ["comments", id, "--json"], decodeComments);
-var statuses = (host, root) => bdJson(host, root, ["statuses", "--json"], decodeStatuses);
-var updateStatus = (host, root, id, status2) => bd(host, root, ["update", id, "--status", status2]);
-var closeBead = (host, root, id, reason) => bd(host, root, ["close", id, ...reason === "" ? [] : ["--reason", reason]]);
-var reopenBead = (host, root, id) => bd(host, root, ["reopen", id]);
-async function write(host, root, { id, from, to, reason }) {
-  const done = (res, second) => ({ _tag: "Written", id, to, error: res.ok ? null : res.error, second });
-  if (to === "closed") {
-    return done(await closeBead(host, root, id, reason), false);
-  }
-  if (from !== "closed") {
-    return done(await updateStatus(host, root, id, to), false);
-  }
-  const reopened = await reopenBead(host, root, id);
-  return !reopened.ok || to === "open" ? done(reopened, false) : done(await updateStatus(host, root, id, to), true);
-}
-async function send(host, { id, title, opener }) {
-  const target = pickTarget(opener, decodePanes(host.panes()), decodeAgents(host.agents()));
-  if (target === null) {
-    return { _tag: "SendFailed", error: { _tag: "NoTarget" } };
-  }
-  const kept = host.readClipboard();
-  const restore = () => {
-    if (kept !== void 0) {
-      host.writeClipboard(kept);
-    }
-  };
-  try {
-    host.writeClipboard(`Work on bead ${id}: ${title}`);
-    host.run("pane.focus", { terminal: target.terminal });
-    for (let i = 0; decodeFocus(host.focused())?.terminal !== target.terminal; i++) {
-      if (i === FOCUS_POLLS) {
-        restore();
-        return { _tag: "SendFailed", error: { _tag: "TargetGone" } };
-      }
-      await host.sleep(FOCUS_POLL_MS);
-    }
-    host.run("terminal.paste");
-    await host.sleep(PASTE_MS);
-    restore();
-    return { _tag: "Sent", agent: target.name };
-  } catch (e) {
-    restore();
-    return { _tag: "SendFailed", error: { _tag: "SendRejected", text: e instanceof Error ? e.message : String(e) } };
-  }
-}
-async function run2(host, root, cmd) {
-  switch (cmd._tag) {
-    case "Load": {
-      const [beads, ready, blocked] = await Promise.all([listBeads(host, root), readyIds(host, root), blockedBeads(host, root)]);
-      if (!beads.ok) {
-        return { _tag: "Loaded", res: beads };
-      }
-      if (!ready.ok) {
-        return { _tag: "Loaded", res: ready };
-      }
-      if (!blocked.ok) {
-        return { _tag: "Loaded", res: blocked };
-      }
-      const locks = new Map(blocked.value.map((b) => [b.id, b.blocked_by_count]));
-      return { _tag: "Loaded", res: { ok: true, value: { beads: beads.value, ready: new Set(ready.value), locks } } };
-    }
-    case "Fetch":
-      switch (cmd.part) {
-        case "show":
-          return { _tag: "Shown", id: cmd.id, gen: cmd.gen, res: await showBead(host, root, cmd.id) };
-        case "down":
-        case "up":
-          return { _tag: "Tree", id: cmd.id, gen: cmd.gen, direction: cmd.part, res: await depTree(host, root, cmd.id, cmd.part) };
-        case "comments":
-          return { _tag: "Discussed", id: cmd.id, gen: cmd.gen, res: await beadComments(host, root, cmd.id) };
-      }
-    case "Wait":
-      await host.sleep(WAIT_MS[cmd.timer]);
-      return { _tag: "Waited", id: cmd.id, gen: cmd.gen, timer: cmd.timer };
-    case "Statuses":
-      return { _tag: "StatusesRead", res: await statuses(host, root) };
-    case "Write":
-      return write(host, root, cmd);
-    case "Copy":
-      host.writeClipboard(cmd.id);
-      await host.sleep(FADE_MS);
-      return { _tag: "Faded", what: "copied", n: cmd.n };
-    case "Send":
-      return send(host, cmd);
-    case "Fade":
-      await host.sleep(FADE_MS);
-      return { _tag: "Faded", what: cmd.what, n: cmd.n };
-  }
-}
-
 // src/update.ts
 var initModel = (opener = { terminal: null, tab: null }) => ({
   snapshot: null,
   loading: false,
+  loads: 0,
+  slow: false,
   error: null,
   filters: initFilters(),
   sort: initSort(),
@@ -606,17 +437,24 @@ var land = (m, id) => visible(m).some((b) => b.id === id) ? pick(m, id) : { ...m
 var toList = (m) => ({ ...m, pane: "list", shown: null, back: [], forward: [] });
 function step(m, msg) {
   switch (msg._tag) {
-    case "Refresh":
-      return m.loading ? [m, []] : [{ ...m, loading: true }, [{ _tag: "Load" }]];
+    case "Refresh": {
+      if (m.loading || m.error?._tag === "NoOpener" || m.error?._tag === "RemoteSpace") {
+        return [m, []];
+      }
+      const loads = m.loads + 1;
+      return [{ ...m, loading: true, loads, slow: false }, m.snapshot === null ? [{ _tag: "Load" }, { _tag: "WaitLoad", n: loads }] : [{ _tag: "Load" }]];
+    }
+    case "Slowed":
+      return [m.loading && m.snapshot === null && msg.n === m.loads ? { ...m, slow: true } : m, []];
     case "Loaded": {
       if (m.reload) {
         return [{ ...m, reload: false }, [{ _tag: "Load" }]];
       }
       const writing = new Map([...m.writing].filter(([, s]) => s === "running"));
       if (!msg.res.ok) {
-        return [{ ...m, loading: false, error: msg.res.error, writing }, []];
+        return [{ ...m, loading: false, slow: false, error: msg.res.error, writing }, []];
       }
-      const next = reselect({ ...m, loading: false, error: null, snapshot: msg.res.value, writing });
+      const next = reselect({ ...m, loading: false, slow: false, error: null, snapshot: msg.res.value, writing });
       const id = shownId(next);
       if (id === null) {
         return [{ ...next, details: /* @__PURE__ */ new Map() }, []];
@@ -683,7 +521,7 @@ function step(m, msg) {
       return [{ ...m, menu: m.menu === msg.menu ? null : msg.menu }, []];
     }
     case "ToggleHelp":
-      return [{ ...m, help: !m.help, menu: null }, []];
+      return emptyState(m, null) !== null ? [m, []] : [{ ...m, help: !m.help, menu: null }, []];
     case "Shown":
       return [patch(m, msg.id, "show", msg.gen, { show: toPart(msg.res) }), []];
     case "Tree":
@@ -704,11 +542,11 @@ function step(m, msg) {
       if (b === null || m.writing.has(b.id) || msg.status === b.status) {
         return [{ ...m, menu: null }, []];
       }
-      return msg.status === "closed" ? [{ ...m, menu: "reason" }, []] : write2(m, b.id, b.status, msg.status, "");
+      return msg.status === "closed" ? [{ ...m, menu: "reason" }, []] : write(m, b.id, b.status, msg.status, "");
     }
     case "CloseWith": {
       const b = shownBead(m);
-      return b === null || m.writing.has(b.id) || b.status === "closed" ? [{ ...m, menu: null }, []] : write2(m, b.id, b.status, "closed", msg.reason.trim());
+      return b === null || m.writing.has(b.id) || b.status === "closed" ? [{ ...m, menu: null }, []] : write(m, b.id, b.status, "closed", msg.reason.trim());
     }
     case "Written": {
       const writing = new Map(m.writing);
@@ -751,11 +589,11 @@ function step(m, msg) {
     }
   }
 }
-function flash(m, text2) {
+function flash(m, text3) {
   const n = m.flash + 1;
-  return [{ ...m, flash: n, sent: { n, text: text2 } }, [{ _tag: "Fade", what: "sent", n }]];
+  return [{ ...m, flash: n, sent: { n, text: text3 } }, [{ _tag: "Fade", what: "sent", n }]];
 }
-function write2(m, id, from, to, reason) {
+function write(m, id, from, to, reason) {
   return [{ ...m, menu: null, writeError: null, writing: new Map(m.writing).set(id, "running") }, [{ _tag: "Write", id, from, to, reason }]];
 }
 function move(m, delta) {
@@ -775,6 +613,212 @@ function escape(m) {
     return reselect({ ...m, searching: false, filters: { ...m.filters, search: "" } });
   }
   return m.pane === "detail" && !isWide(m) ? toList(m) : m;
+}
+
+// src/states.ts
+var takesKeyboard = (own, focusedPane, hasKeyboard, m) => own !== null && focusedPane === own && !hasKeyboard && !m.searching && m.menu === null;
+function start(host) {
+  const props2 = decodeProps(host.props());
+  const focus = decodeFocus(host.focused());
+  const folder = props2.root ?? focus?.cwd ?? null;
+  const opener = openerOf(props2.opener, focus, decodePanes(host.panes()));
+  const model = initModel(opener);
+  if (folder === null) {
+    return { root: null, model: { ...model, error: { _tag: "NoOpener" } } };
+  }
+  return isRemoteTab(host.spaces(), opener.tab) ? { root: null, model: { ...model, error: { _tag: "RemoteSpace" } } } : { root: folder, model };
+}
+function emptyState(m, root) {
+  switch (m.error?._tag) {
+    case "NoOpener":
+      return { title: "Open from a terminal", hint: null, retry: false };
+    case "RemoteSpace":
+      return { title: "Remote spaces aren't supported yet", hint: null, retry: false };
+    case "NoDatabase":
+      return m.snapshot === null ? { title: `No beads database in ${root ?? "this folder"}`, hint: "Run bd init in that folder to create one.", retry: true } : null;
+    default:
+      return null;
+  }
+}
+var retryLabel = (loading) => loading ? "Retrying\u2026" : "Retry";
+var bdText = (e) => e._tag === "Undecodable" ? `bd ${e.version ?? "(version unknown)"} gave output this viewer does not understand: ${e.path} ${e.detail}` : "text" in e ? e.text : e._tag;
+
+// src/runner.ts
+var BD_TIMEOUT_MS = 15e3;
+var RETRY_DELAYS_MS = [300, 900];
+var WAIT_MS = { fetch: 120, loading: 150 };
+var FADE_MS = 1200;
+var FOCUS_POLL_MS = 50;
+var FOCUS_POLLS = 30;
+var PASTE_MS = 300;
+var fail = (error) => ({ ok: false, error });
+function errorText({ stdout, stderr }) {
+  let out = stdout.trim();
+  try {
+    const message = JSON.parse(stdout).error;
+    out = typeof message === "string" ? message : out;
+  } catch {
+  }
+  return [stderr.trim(), out].filter((part) => part !== "").join("\n");
+}
+function classify(result) {
+  const text3 = errorText(result);
+  if (text3.includes("no beads database found")) {
+    return { _tag: "NoDatabase", text: text3 };
+  }
+  if (text3.includes("maintenance operation is running")) {
+    return { _tag: "BdLocked", text: text3 };
+  }
+  if (/^Issue \S+ not found/m.test(text3) || /no issues? found matching/.test(text3)) {
+    return { _tag: "BeadGone", text: text3 };
+  }
+  return { _tag: "BdRejected", code: result.code, text: text3 };
+}
+async function rejection(host, text3) {
+  if (/took longer than .* and was stopped/.test(text3)) {
+    return { _tag: "BdTimeout", text: text3 };
+  }
+  if (!text3.includes("cannot run ")) {
+    return { _tag: "BdRejected", code: -1, text: text3 };
+  }
+  const bdStarts = await host.exec("bd", ["--version"], { timeout: BD_TIMEOUT_MS }).then(
+    () => true,
+    () => false
+  );
+  return bdStarts ? { _tag: "BdRejected", code: -1, text: text3 } : { _tag: "BdMissing", text: text3 };
+}
+async function once(host, root, args) {
+  let result;
+  try {
+    result = await host.exec("bd", args, { cwd: root, timeout: BD_TIMEOUT_MS });
+  } catch (e) {
+    return fail(await rejection(host, e instanceof Error ? e.message : String(e)));
+  }
+  return result.code === 0 ? { ok: true, value: result.stdout } : fail(classify(result));
+}
+async function bd(host, root, args) {
+  let res = await once(host, root, args);
+  for (const delay of RETRY_DELAYS_MS) {
+    if (res.ok || res.error._tag !== "BdLocked" && res.error._tag !== "BdTimeout") {
+      break;
+    }
+    await host.sleep(delay);
+    res = await once(host, root, args);
+  }
+  return res;
+}
+async function bdVersion(host, root) {
+  const res = await once(host, root, ["--version"]);
+  return res.ok ? res.value.match(/\d+\.\d+\.\d+\S*/)?.[0] ?? null : null;
+}
+async function bdJson(host, root, args, decode) {
+  const out = await bd(host, root, args);
+  if (!out.ok) {
+    return out;
+  }
+  const res = decode(out.value, null);
+  if (res.ok || res.error._tag !== "Undecodable") {
+    return res;
+  }
+  return decode(out.value, await bdVersion(host, root));
+}
+var listBeads = (host, root) => bdJson(host, root, ["list", "--all", "-n", "0", "--brief", "--json"], decodeList);
+var readyIds = (host, root) => bdJson(host, root, ["ready", "-n", "0", "--json"], decodeReady);
+var blockedBeads = (host, root) => bdJson(host, root, ["blocked", "--json"], decodeBlocked);
+var showBead = (host, root, id) => bdJson(host, root, ["show", id, "--json"], decodeShow);
+var depTree = (host, root, id, direction) => bdJson(host, root, ["dep", "tree", id, `--direction=${direction}`, "--json"], decodeTree);
+var beadComments = (host, root, id) => bdJson(host, root, ["comments", id, "--json"], decodeComments);
+var statuses = (host, root) => bdJson(host, root, ["statuses", "--json"], decodeStatuses);
+var updateStatus = (host, root, id, status2) => bd(host, root, ["update", id, "--status", status2]);
+var closeBead = (host, root, id, reason) => bd(host, root, ["close", id, ...reason === "" ? [] : ["--reason", reason]]);
+var reopenBead = (host, root, id) => bd(host, root, ["reopen", id]);
+async function write2(host, root, { id, from, to, reason }) {
+  const done = (res, second) => ({ _tag: "Written", id, to, error: res.ok ? null : res.error, second });
+  if (to === "closed") {
+    return done(await closeBead(host, root, id, reason), false);
+  }
+  if (from !== "closed") {
+    return done(await updateStatus(host, root, id, to), false);
+  }
+  const reopened = await reopenBead(host, root, id);
+  return !reopened.ok || to === "open" ? done(reopened, false) : done(await updateStatus(host, root, id, to), true);
+}
+async function send(host, { id, title, opener }) {
+  const target = pickTarget(opener, decodePanes(host.panes()), decodeAgents(host.agents()));
+  if (target === null) {
+    return { _tag: "SendFailed", error: { _tag: "NoTarget" } };
+  }
+  const kept = host.readClipboard();
+  const restore = () => {
+    if (kept !== void 0) {
+      host.writeClipboard(kept);
+    }
+  };
+  try {
+    host.writeClipboard(`Work on bead ${id}: ${title}`);
+    host.run("pane.focus", { terminal: target.terminal });
+    for (let i = 0; decodeFocus(host.focused())?.terminal !== target.terminal; i++) {
+      if (i === FOCUS_POLLS) {
+        restore();
+        return { _tag: "SendFailed", error: { _tag: "TargetGone" } };
+      }
+      await host.sleep(FOCUS_POLL_MS);
+    }
+    host.run("terminal.paste");
+    await host.sleep(PASTE_MS);
+    restore();
+    return { _tag: "Sent", agent: target.name };
+  } catch (e) {
+    restore();
+    return { _tag: "SendFailed", error: { _tag: "SendRejected", text: e instanceof Error ? e.message : String(e) } };
+  }
+}
+async function run2(host, root, cmd) {
+  switch (cmd._tag) {
+    case "Load": {
+      const [beads, ready, blocked] = await Promise.all([listBeads(host, root), readyIds(host, root), blockedBeads(host, root)]);
+      if (!beads.ok) {
+        return { _tag: "Loaded", res: beads };
+      }
+      if (!ready.ok) {
+        return { _tag: "Loaded", res: ready };
+      }
+      if (!blocked.ok) {
+        return { _tag: "Loaded", res: blocked };
+      }
+      const locks = new Map(blocked.value.map((b) => [b.id, b.blocked_by_count]));
+      return { _tag: "Loaded", res: { ok: true, value: { beads: beads.value, ready: new Set(ready.value), locks } } };
+    }
+    case "WaitLoad":
+      await host.sleep(WAIT_MS.loading);
+      return { _tag: "Slowed", n: cmd.n };
+    case "Fetch":
+      switch (cmd.part) {
+        case "show":
+          return { _tag: "Shown", id: cmd.id, gen: cmd.gen, res: await showBead(host, root, cmd.id) };
+        case "down":
+        case "up":
+          return { _tag: "Tree", id: cmd.id, gen: cmd.gen, direction: cmd.part, res: await depTree(host, root, cmd.id, cmd.part) };
+        case "comments":
+          return { _tag: "Discussed", id: cmd.id, gen: cmd.gen, res: await beadComments(host, root, cmd.id) };
+      }
+    case "Wait":
+      await host.sleep(WAIT_MS[cmd.timer]);
+      return { _tag: "Waited", id: cmd.id, gen: cmd.gen, timer: cmd.timer };
+    case "Statuses":
+      return { _tag: "StatusesRead", res: await statuses(host, root) };
+    case "Write":
+      return write2(host, root, cmd);
+    case "Copy":
+      host.writeClipboard(cmd.id);
+      await host.sleep(FADE_MS);
+      return { _tag: "Faded", what: "copied", n: cmd.n };
+    case "Send":
+      return send(host, cmd);
+    case "Fade":
+      await host.sleep(FADE_MS);
+      return { _tag: "Faded", what: cmd.what, n: cmd.n };
+  }
 }
 
 // src/store.ts
@@ -814,9 +858,53 @@ var Store = class {
   }
 };
 
+// src/toggle.ts
+import { svg } from "gpui-kit";
+import { h_flex } from "gpui-base";
+function drawToggle(on, t, click) {
+  return h_flex().size_full().pr(10).items_center().bg(t.chrome).border_b(1).border_color(t.border).child(
+    h_flex().id("toggle-beads").h(26).px(8).gap(5).flex_none().items_center().rounded(6).text_size(12).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted).hover((s) => s.bg(t.hover)).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click(click).child(svg("mods/beads/icons/task.svg").size(14)).child("Beads")
+  );
+}
+
+// src/toggle-state.ts
+var TOGGLE_MS = 500;
+var text2 = (x) => typeof x === "string" && x !== "" ? x : null;
+var field = (o, key) => typeof o === "object" && o !== null ? o[key] : void 0;
+var isToggle = (props2) => field(props2, "role") === "toggle";
+function beadsPane(panes2, focus) {
+  const tab = text2(field(focus, "tab"));
+  if (tab === null || !Array.isArray(panes2)) {
+    return null;
+  }
+  return text2(
+    field(
+      panes2.find((p) => field(p, "mod") === "beads" && field(p, "tab") === tab),
+      "pane"
+    )
+  );
+}
+function clickToggle(host) {
+  const pane = beadsPane(host.panes(), host.focused());
+  if (pane === null) {
+    host.run("pane.split", { direction: "right", mod: "beads" });
+  } else {
+    host.run("pane.close", { pane });
+  }
+}
+function watchToggle(cx, host, state) {
+  return cx.timer.every(TOGGLE_MS, () => {
+    const now = beadsPane(host.panes(), host.focused());
+    if (now !== state.pane) {
+      state.pane = now;
+      cx.notify();
+    }
+  });
+}
+
 // src/view.ts
-import { div, svg, uniform_list } from "gpui-kit";
-import { h_flex, Input, Popup, Scrollbar, TextView, v_flex } from "gpui-base";
+import { div, svg as svg2, uniform_list } from "gpui-kit";
+import { h_flex as h_flex2, Input, Popup, Scrollbar, TextView, v_flex } from "gpui-base";
 var icon = (name2) => `mods/beads/icons/${name2}.svg`;
 var pick2 = (t, ...keys) => {
   const found = keys.find((k) => t[k] !== void 0);
@@ -842,17 +930,17 @@ var STATUS_LABEL = { open: "OPEN", in_progress: "IN PROG", blocked: "BLOCKED", d
 var statusLabel = (status2) => STATUS_LABEL[status2] ?? status2.toUpperCase().slice(0, 8);
 var TYPE_ICON = /* @__PURE__ */ new Set(["task", "bug", "feature", "epic", "chore"]);
 function button(id, label, on, t, click, chevron = false) {
-  return h_flex().id(id).h(26).px(8).gap(4).flex_none().items_center().rounded(6).border_1().border_color(on ? t.accent : t.border).text_size(12).text_color(on ? t.foreground : t.muted).when(on, (e) => e.bg(t.selected)).cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
+  return h_flex2().id(id).h(26).px(8).gap(4).flex_none().items_center().rounded(6).border_1().border_color(on ? t.accent : t.border).text_size(12).text_color(on ? t.foreground : t.muted).when(on, (e) => e.bg(t.selected)).cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
     cx.stop_propagation();
     click();
-  }).child(label).when(chevron, (e) => e.child(svg(icon("chevron-down")).size(12).flex_none()));
+  }).child(label).when(chevron, (e) => e.child(svg2(icon("chevron-down")).size(12).flex_none()));
 }
 function iconButton(id, name2, tip, t, click, spin = false) {
   return div().id(id).w(26).h(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(t.muted).tooltip(tip).accessibility_label(tip).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
     cx.stop_propagation();
     click();
   }).child(
-    svg(icon(name2)).size(14).flex_none().when(spin, (e) => e.spin(900))
+    svg2(icon(name2)).size(14).flex_none().when(spin, (e) => e.spin(900))
   );
 }
 function walkButton(id, glyph, tip, on, t, click) {
@@ -865,11 +953,12 @@ function walkButton(id, glyph, tip, on, t, click) {
   ).accessibility_label(tip).child(glyph);
 }
 var SORT_LABEL = (key) => key.charAt(0).toUpperCase() + key.slice(1);
-function searchBox(ui) {
-  return div().id("search").flex_1().min_w(120).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(Input.new(ui.search).h(26).w_full().text_size(12));
+function searchBox(m, rows, t, dispatch, ui) {
+  const count = m.snapshot === null ? "" : `${rows.length}/${m.snapshot.beads.length}`;
+  return h_flex2().id("search").flex_1().min_w(120).h(30).px(8).gap(6).items_center().rounded(7).border_1().border_color(m.searching ? t.accent : t.border).cursor_text().on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click(() => dispatch({ _tag: "FocusSearch" })).child(div().flex_1().min_w(0).child(Input.new(ui.search).h_full().w_full().text_size(12))).child(div().flex_none().text_size(10).text_color(t.dim).child(count));
 }
 var panel = (t) => v_flex().min_w(140).py(4).rounded(8).border_1().border_color(t.border).bg(t.popover);
-var option = (id, label, on, t, click) => h_flex().id(id).h(26).px(10).gap(8).items_center().text_size(12).text_color(on ? t.accent : t.foreground).cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
+var option = (id, label, on, t, click) => h_flex2().id(id).h(26).px(10).gap(8).items_center().text_size(12).text_color(on ? t.accent : t.foreground).cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
   cx.stop_propagation();
   click();
 }).child(label);
@@ -891,15 +980,12 @@ function filters(m, t, dispatch, narrow) {
     iconButton("reverse", m.sort.reverse ? "arrow-up" : "arrow-down", "Reverse the sort", t, () => dispatch({ _tag: "Reverse" }))
   ];
 }
-function topBar(m, t, dispatch, ui, wide) {
+function topBar(m, rows, t, dispatch, ui, short) {
   const refresh = iconButton("refresh", "refresh", "Refresh (Ctrl+R)", t, () => dispatch({ _tag: "Refresh" }), m.loading);
-  return v_flex().flex_none().border_b(1).border_color(t.border).child(
-    h_flex().px(8).py(6).gap(6).items_center().child(searchBox(ui)).when(wide, (e) => e.children(filters(m, t, dispatch, false))).child(refresh)
-  ).when(
-    !wide,
-    (e) => e.child(
-      h_flex().px(8).pb(6).gap(6).items_center().children(filters(m, t, dispatch, true))
-    )
+  return v_flex().flex_none().px(8).pt(8).pb(6).gap(6).border_b(1).border_color(t.border).child(
+    h_flex2().gap(6).items_center().child(searchBox(m, rows, t, dispatch, ui)).child(refresh)
+  ).child(
+    h_flex2().gap(6).items_center().children(filters(m, t, dispatch, short))
   );
 }
 function row(b, m, t, narrow, now, idW, mono) {
@@ -908,12 +994,12 @@ function row(b, m, t, narrow, now, idW, mono) {
   const dim = (c) => closed ? t.muted : c;
   const locks = m.snapshot?.locks.get(b.id) ?? 0;
   const status2 = statusColor(b.status, t);
-  return h_flex().id(b.id).w_full().h(ROW_H).flex_none().pr(10).gap(6).items_center().text_size(12).cursor_pointer().text_color(closed ? t.muted : t.foreground).when(selected, (e) => e.bg(pick2(t, "surface0", "raised"))).hover((s) => s.bg(t.hover)).child(
+  return h_flex2().id(b.id).w_full().h(ROW_H).flex_none().pr(10).gap(6).items_center().text_size(12).cursor_pointer().text_color(closed ? t.muted : t.foreground).when(selected, (e) => e.bg(pick2(t, "surface0", "raised"))).hover((s) => s.bg(t.hover)).child(
     div().w(2).h_full().flex_none().when(selected, (e) => e.bg(t.accent))
   ).when(
     !narrow,
     (e) => e.child(
-      svg(icon(TYPE_ICON.has(b.issue_type) ? b.issue_type : "task")).size(14).flex_none().text_color(closed ? t.muted : t.dim)
+      svg2(icon(TYPE_ICON.has(b.issue_type) ? b.issue_type : "task")).size(14).flex_none().text_color(closed ? t.muted : t.dim)
     )
   ).child(
     div().w(16).flex_none().text_size(11).font_semibold().text_color(dim(priorityColor(b.priority, t))).child(`P${b.priority}`)
@@ -922,14 +1008,16 @@ function row(b, m, t, narrow, now, idW, mono) {
   ).child(div().flex_1().min_w(0).truncate().child(b.title)).when(
     locks > 0,
     (e) => e.child(
-      h_flex().gap(2).flex_none().items_center().text_size(11).text_color(closed ? t.muted : peach(t)).child(svg(icon("lock")).size(11)).child(`${locks}`)
+      h_flex2().gap(2).flex_none().items_center().text_size(11).text_color(closed ? t.muted : peach(t)).child(svg2(icon("lock")).size(11)).child(`${locks}`)
     )
   ).when(m.width >= NO_AGE_BELOW, (e) => e.child(div().w(26).flex_none().text_size(11).text_color(t.muted).text_right().child(age(b.created_at, now))));
 }
 function listColumn(m, rows, t, dispatch, ui, narrow, now) {
   const idW = idChars(rows);
   return div().flex_1().min_h(0).relative().child(
-    rows.length === 0 ? div().p(14).text_color(t.muted).child(m.snapshot === null ? m.loading ? "Loading beads..." : "" : "No beads match") : (
+    rows.length === 0 ? div().p(14).text_color(t.muted).child(
+      m.snapshot === null ? m.slow ? h_flex2().gap(8).items_center().child(svg2(icon("refresh")).size(14).flex_none().spin(900)).child("Loading beads") : "" : "No beads match"
+    ) : (
       // Only the rows on screen are built, so a thousand beads cost what twenty do.
       uniform_list(
         "beads-list",
@@ -956,15 +1044,14 @@ var KEYS = [
   ["?", "Show or hide these keys"]
 ];
 function keysPanel(t, mono) {
-  return v_flex().flex_1().min_h(0).p(14).gap(6).text_size(12).child(div().font_semibold().child("Keys")).children(KEYS.map(([k, what]) => h_flex().gap(12).child(div().w(90).flex_none().font_family(mono).text_size(11).text_color(t.accent).child(k)).child(div().flex_1().min_w(0).text_color(t.muted).child(what))));
+  return v_flex().flex_1().min_h(0).p(14).gap(6).text_size(12).child(div().font_semibold().child("Keys")).children(KEYS.map(([k, what]) => h_flex2().gap(12).child(div().w(90).flex_none().font_family(mono).text_size(11).text_color(t.accent).child(k)).child(div().flex_1().min_w(0).text_color(t.muted).child(what))));
 }
-var bdText = (e) => "text" in e ? e.text : `bd ${e.version ?? "(version unknown)"} gave output this viewer does not understand: ${e.path} ${e.detail}`;
 var heading = (label, t) => div().text_size(11).font_semibold().text_color(t.muted).child(label.toUpperCase());
 var section = (label, t, ...body) => v_flex().gap(4).flex_none().child(heading(label, t)).children(body);
-var markdown = (id, text2) => TextView.markdown(id, text2).selectable(true).scrollable(false).w_full().min_w(0);
+var markdown = (id, text3) => TextView.markdown(id, text3).selectable(true).scrollable(false).w_full().min_w(0);
 var red = (t) => pick2(t, "red", "ansi1");
 function failed(label, error, part, t, dispatch) {
-  return section(label, t, div().text_size(12).text_color(red(t)).child(bdText(error)), h_flex().child(button(`retry-${part}`, "Retry", false, t, () => dispatch({ _tag: "Retry", part }))));
+  return section(label, t, div().text_size(12).text_color(red(t)).child(bdText(error)), h_flex2().child(button(`retry-${part}`, "Retry", false, t, () => dispatch({ _tag: "Retry", part }))));
 }
 var GUIDE = 14;
 function treeRow(r, key, t, dispatch, mono) {
@@ -976,8 +1063,8 @@ function treeRow(r, key, t, dispatch, mono) {
   ) : line(div().w(GUIDE).h(ROW_H).flex_none()).child(
     div().w(10).h(ROW_H / 2).border_b(1).border_color(t.border)
   );
-  return h_flex().h(ROW_H).flex_none().gap(6).items_center().text_size(12).opacity(r.repeat ? 0.5 : 1).child(
-    h_flex().flex_none().children([...r.guides.map((on) => on ? line(div().w(GUIDE).h(ROW_H).flex_none()) : div().w(GUIDE).h(ROW_H).flex_none()), own])
+  return h_flex2().h(ROW_H).flex_none().gap(6).items_center().text_size(12).opacity(r.repeat ? 0.5 : 1).child(
+    h_flex2().flex_none().children([...r.guides.map((on) => on ? line(div().w(GUIDE).h(ROW_H).flex_none()) : div().w(GUIDE).h(ROW_H).flex_none()), own])
   ).child(div().w(8).h(8).flex_none().rounded(4).bg(statusColor(r.status, t))).child(
     div().id(key).flex_none().font_family(mono).text_size(11).text_color(t.accent).cursor_pointer().hover((s) => s.underline()).on_click((_e, cx) => {
       cx.stop_propagation();
@@ -999,9 +1086,9 @@ function tree(label, part, p, empty, t, dispatch, mono) {
 function statusPill(b, m, t, dispatch, ui) {
   const color = statusColor(b.status, t);
   const busy = m.writing.has(b.id);
-  const pill = h_flex().id("status-pill").gap(3).px(6).items_center().rounded(4).border_1().border_color(color).text_size(10).font_semibold().text_color(color).opacity(busy ? 0.6 : 1).when(busy, (e) => e.child(svg(icon("refresh")).size(10).flex_none().spin(900))).child(statusLabel(b.status)).when(
+  const pill = h_flex2().id("status-pill").gap(3).px(6).items_center().rounded(4).border_1().border_color(color).text_size(10).font_semibold().text_color(color).opacity(busy ? 0.6 : 1).when(busy, (e) => e.child(svg2(icon("refresh")).size(10).flex_none().spin(900))).child(statusLabel(b.status)).when(
     !busy,
-    (e) => e.child(svg(icon("chevron-down")).size(10).flex_none()).tooltip("Change status (s)").cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
+    (e) => e.child(svg2(icon("chevron-down")).size(10).flex_none()).tooltip("Change status (s)").cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
       cx.stop_propagation();
       dispatch({ _tag: "ToggleMenu", menu: "pick" });
     })
@@ -1012,16 +1099,16 @@ function statusPill(b, m, t, dispatch, ui) {
       panel(t).w(240).p(8).gap(6).child(div().text_size(11).text_color(t.muted).child("Reason for closing (optional)")).child(
         div().on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(Input.new(ui.reason).h(26).w_full().text_size(12))
       ).child(
-        h_flex().gap(6).justify_end().child(button("close-cancel", "Cancel", false, t, () => dispatch({ _tag: "Escape" }))).child(button("close-confirm", "Close bead", true, t, () => dispatch({ _tag: "CloseWith", reason: ui.reason.value() })))
+        h_flex2().gap(6).justify_end().child(button("close-cancel", "Cancel", false, t, () => dispatch({ _tag: "Escape" }))).child(button("close-confirm", "Close bead", true, t, () => dispatch({ _tag: "CloseWith", reason: ui.reason.value() })))
       )
     )
   );
 }
 var FADE = { duration: 120, easing: "ease-out" };
 function crossfade(a, b, showB, colorB) {
-  const layer = (text2, on, color) => {
+  const layer = (text3, on, color) => {
     const e = div().absolute().inset_0().flex().items_center().justify_center().whitespace_nowrap().opacity(on ? 1 : 0).transition("opacity", FADE);
-    return (color === void 0 ? e : e.text_color(color)).child(text2);
+    return (color === void 0 ? e : e.text_color(color)).child(text3);
   };
   return div().relative().flex_none().child(
     div().opacity(0).whitespace_nowrap().child(b.length > a.length ? b : a)
@@ -1036,7 +1123,7 @@ function copyButton(b, m, t, dispatch) {
 }
 function sendButton(m, t, dispatch, ui) {
   const on = ui.target !== null;
-  return h_flex().id("send-to-agent").h(26).px(8).flex_none().items_center().rounded(6).border_1().border_color(t.border).text_size(12).text_color(on ? t.foreground : t.muted).opacity(on ? 1 : 0.5).tooltip(ui.target === null ? "No agent in this tab" : `Type the prompt into ${ui.target.name}, without Enter`).accessibility_label("Send to agent").when(
+  return h_flex2().id("send-to-agent").h(26).px(8).flex_none().items_center().rounded(6).border_1().border_color(t.border).text_size(12).text_color(on ? t.foreground : t.muted).opacity(on ? 1 : 0.5).tooltip(ui.target === null ? "No agent in this tab" : `Type the prompt into ${ui.target.name}, without Enter`).accessibility_label("Send to agent").when(
     on,
     (e) => e.cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
       cx.stop_propagation();
@@ -1046,8 +1133,8 @@ function sendButton(m, t, dispatch, ui) {
 }
 function metaRow(b, m, t, dispatch, ui, now) {
   const ago = age(b.created_at, now);
-  return h_flex().flex_wrap().gap_x(10).gap_y(4).items_center().text_size(12).child(
-    h_flex().gap(2).items_center().flex_none().child(div().font_family(ui.mono).text_size(12).text_color(t.muted).child(b.id)).child(copyButton(b, m, t, dispatch))
+  return h_flex2().flex_wrap().gap_x(10).gap_y(4).items_center().text_size(12).child(
+    h_flex2().gap(2).items_center().flex_none().child(div().font_family(ui.mono).text_size(12).text_color(t.muted).child(b.id)).child(copyButton(b, m, t, dispatch))
   ).child(statusPill(b, m, t, dispatch, ui)).child(div().text_size(11).font_semibold().text_color(priorityColor(b.priority, t)).child(`P${b.priority}`)).when(b.assignee !== null, (e) => e.child(div().text_color(t.muted).child(`@${b.assignee}`))).child(
     div().id("age").text_color(t.muted).tooltip(`Created ${fullDate(b.created_at)}`).child(ago === "now" ? ago : `${ago} ago`)
   );
@@ -1057,20 +1144,20 @@ function beadBody(d, e, m, hidden, t, dispatch, ui, now) {
   const comments = e.comments._tag === "Ready" ? e.comments.value : e.comments._tag === "Loading" ? e.comments.prev ?? [] : [];
   const sorted = [...comments].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
   return [
-    h_flex().gap(8).items_start().flex_none().child(
-      svg(icon(TYPE_ICON.has(d.issue_type) ? d.issue_type : "task")).size(18).flex_none().text_color(t.dim)
+    h_flex2().gap(8).items_start().flex_none().child(
+      svg2(icon(TYPE_ICON.has(d.issue_type) ? d.issue_type : "task")).size(18).flex_none().text_color(t.dim)
     ).child(div().flex_1().min_w(0).max_h(40).overflow_hidden().text_size(16).line_height(1.25).font_semibold().child(d.title)),
     ...hidden ? [div().flex_none().text_size(12).text_color(t.muted).child("Hidden by the current filters")] : [],
     metaRow(d, m, t, dispatch, ui, now),
     ...m.writeError?.id === d.id ? [div().flex_none().text_size(12).text_color(red(t)).child(writeText(m.writeError))] : [],
-    h_flex().gap(8).items_start().flex_none().child(
-      h_flex().flex_1().min_w(0).flex_wrap().gap(4).children(
+    h_flex2().gap(8).items_start().flex_none().child(
+      h_flex2().flex_1().min_w(0).flex_wrap().gap(4).children(
         d.labels.map(
           (l) => div().px(6).py(1).rounded(4).bg(pick2(t, "surface0", "raised")).text_size(11).text_color(t.muted).child(l)
         )
       )
     ).child(sendButton(m, t, dispatch, ui)),
-    ...textSections(d).map(([label, text2]) => section(label, t, markdown(`md-${d.id}-${label}`, text2))),
+    ...textSections(d).map(([label, text3]) => section(label, t, markdown(`md-${d.id}-${label}`, text3))),
     ...tree("Blocked by", "down", e.down, "Nothing blocks this bead.", t, dispatch, ui.mono),
     ...tree("Blocks", "up", e.up, "This bead blocks nothing.", t, dispatch, ui.mono),
     ...e.comments._tag === "Failed" ? [failed("Comments", e.comments.error, "comments", t, dispatch)] : [],
@@ -1080,7 +1167,7 @@ function beadBody(d, e, m, hidden, t, dispatch, ui, now) {
         t,
         ...sorted.map(
           (c) => v_flex().gap(2).flex_none().child(
-            h_flex().gap(8).items_center().text_size(12).child(div().font_semibold().child(c.author)).child(div().id(`comment-age-${c.id}`).text_size(11).text_color(t.muted).tooltip(fullDate(c.created_at)).child(age(c.created_at, now)))
+            h_flex2().gap(8).items_center().text_size(12).child(div().font_semibold().child(c.author)).child(div().id(`comment-age-${c.id}`).text_size(11).text_color(t.muted).tooltip(fullDate(c.created_at)).child(age(c.created_at, now)))
           ).child(markdown(`md-${d.id}-c-${c.id}`, c.text))
         )
       )
@@ -1089,7 +1176,7 @@ function beadBody(d, e, m, hidden, t, dispatch, ui, now) {
 }
 function detailBody(m, rows, t, dispatch, ui, now) {
   const id = shownId(m);
-  const note = (text2, color = t.muted) => div().flex_none().text_size(12).text_color(color).child(text2);
+  const note = (text3, color = t.muted) => div().flex_none().text_size(12).text_color(color).child(text3);
   if (id === null) {
     return [note("Select a bead")];
   }
@@ -1101,10 +1188,10 @@ function detailBody(m, rows, t, dispatch, ui, now) {
   if (show._tag === "Failed") {
     return show.error._tag === "BeadGone" ? [
       note(`${id} no longer exists`),
-      h_flex().flex_none().child(button("refresh-gone", "Refresh", false, t, () => dispatch({ _tag: "Refresh" })))
+      h_flex2().flex_none().child(button("refresh-gone", "Refresh", false, t, () => dispatch({ _tag: "Refresh" })))
     ] : [
       note(bdText(show.error), red(t)),
-      h_flex().flex_none().child(button("retry-show", "Retry", false, t, () => dispatch({ _tag: "Retry", part: "show" })))
+      h_flex2().flex_none().child(button("retry-show", "Retry", false, t, () => dispatch({ _tag: "Retry", part: "show" })))
     ];
   }
   const bead2 = shownBead(m);
@@ -1116,13 +1203,13 @@ function detailBody(m, rows, t, dispatch, ui, now) {
 function detailPane(m, rows, t, dispatch, ui, narrow, now) {
   const scroll = `detail-${shownId(m) ?? "none"}`;
   return v_flex().flex_1().min_w(0).min_h(0).when(!narrow, (e) => e.border_l(2).border_color(m.pane === "detail" ? t.accent : t.border)).child(
-    h_flex().h(36).flex_none().px(8).gap(4).items_center().border_b(1).border_color(t.border).when(
+    h_flex2().h(36).flex_none().px(8).gap(4).items_center().border_b(1).border_color(t.border).when(
       narrow,
       (e) => e.child(
-        h_flex().id("back").h(26).pl(4).pr(8).gap(2).items_center().rounded(6).text_size(12).text_color(t.muted).cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
+        h_flex2().id("back").h(26).pl(4).pr(8).gap(2).items_center().rounded(6).text_size(12).text_color(t.muted).cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
           cx.stop_propagation();
           dispatch({ _tag: "BackToList" });
-        }).child(svg(icon("chevron-left")).size(14).flex_none()).child("List")
+        }).child(svg2(icon("chevron-left")).size(14).flex_none()).child("List")
       )
     ).child(walkButton("history-back", "\u2039", "Back ([)", m.back.length > 0, t, () => dispatch({ _tag: "Walk", delta: -1 }))).child(walkButton("history-forward", "\u203A", "Forward (])", m.forward.length > 0, t, () => dispatch({ _tag: "Walk", delta: 1 })))
   ).child(
@@ -1133,41 +1220,51 @@ function detailPane(m, rows, t, dispatch, ui, narrow, now) {
 }
 function footer(m, rows, t, wide) {
   const s = m.snapshot;
-  const counts = s === null ? "" : wide ? `${rows.length} of ${s.beads.length} \xB7 ${s.ready.size} ready` : `${rows.length} of ${s.beads.length}`;
-  return h_flex().h(26).flex_none().px(12).gap(12).items_center().border_t(1).border_color(t.border).text_size(11).text_color(t.muted).child(div().flex_1().min_w(0).truncate().child(counts)).child(
+  const counts = s === null ? "" : `${s.ready.size} ready`;
+  return h_flex2().h(26).flex_none().px(12).gap(12).items_center().border_t(1).border_color(t.border).text_size(11).text_color(t.muted).child(div().flex_1().min_w(0).truncate().child(counts)).child(
     div().flex_none().child(wide ? "/ search \xB7 \u21B5 open \xB7 ? keys" : "\u21B5 open")
   );
+}
+function emptyView(title, hint, retry, loading, t, dispatch) {
+  return v_flex().flex_1().min_h(0).p(14).gap(8).items_center().justify_center().text_center().child(div().text_color(t.muted).child(title)).when(
+    hint !== null,
+    (e) => e.child(
+      div().text_size(12).text_color(t.dim).child(hint ?? "")
+    )
+  ).when(retry, (e) => e.child(button("retry-load", retryLabel(loading), false, t, () => dispatch({ _tag: "Refresh" })).opacity(loading ? 0.6 : 1)));
 }
 var errorText2 = (m) => m.error === null ? null : bdText(m.error);
 function draw(m, rows, t, dispatch, ui, now) {
   const wide = isWide(m);
   const detailFull = !wide && m.pane === "detail";
   const error = errorText2(m);
+  const empty = emptyState(m, ui.root);
   return v_flex().id("beads").size_full().min_h(0).overflow_hidden().bg(t.background).text_color(t.foreground).text_size(13).track_focus(ui.nav).on_size_change((size) => dispatch({ _tag: "Resized", width: Math.round(size.width) })).on_key_down((ev, cx) => {
     const msg = keyFor(m, ev.keystroke);
     if (msg !== null) {
       dispatch(msg);
       cx.stop_propagation();
     }
-  }).when(detailFull, (e) => e.child(detailPane(m, rows, t, dispatch, ui, true, now))).when(
-    !detailFull,
-    (e) => e.child(topBar(m, t, dispatch, ui, wide)).when(
-      error !== null,
-      (x) => x.child(
-        div().px(12).py(6).flex_none().text_size(12).text_color(pick2(t, "red", "ansi1")).child(error ?? "")
-      )
-    ).child(
-      m.help ? keysPanel(t, ui.mono) : wide ? h_flex().flex_1().min_h(0).child(
-        v_flex().w(listWidth(m.width)).h_full().flex_none().child(listColumn(m, rows, t, dispatch, ui, false, now))
-      ).child(detailPane(m, rows, t, dispatch, ui, false, now)) : listColumn(m, rows, t, dispatch, ui, true, now)
+  }).when(empty !== null, (e) => e.child(emptyView(empty?.title ?? "", empty?.hint ?? null, empty?.retry ?? false, m.loading, t, dispatch))).when(empty === null && detailFull, (e) => e.child(detailPane(m, rows, t, dispatch, ui, true, now))).when(
+    empty === null && !detailFull,
+    (e) => e.child(
+      m.help ? keysPanel(t, ui.mono) : wide ? h_flex2().flex_1().min_h(0).items_stretch().child(list(m, rows, t, dispatch, ui, error, now, true).w(listWidth(m.width)).flex_none()).child(detailPane(m, rows, t, dispatch, ui, false, now)) : list(m, rows, t, dispatch, ui, error, now, false).flex_1()
     ).child(footer(m, rows, t, wide))
   );
 }
+function list(m, rows, t, dispatch, ui, error, now, wide) {
+  return v_flex().min_h(0).child(topBar(m, rows, t, dispatch, ui, !wide || listWidth(m.width) < 480)).when(
+    error !== null,
+    (x) => x.child(
+      h_flex2().px(12).py(6).gap(8).items_center().flex_none().text_size(12).child(
+        div().flex_1().min_w(0).text_color(pick2(t, "red", "ansi1")).child(error ?? "")
+      ).child(button("retry-load", "Retry", false, t, () => dispatch({ _tag: "Refresh" })))
+    )
+  ).child(listColumn(m, rows, t, dispatch, ui, !wide, now));
+}
 
 // src/main.ts
-function viewedRepo(host) {
-  return decodeProps(host.props()).root ?? decodeFocus(host.focused())?.cwd ?? null;
-}
+var KEYBOARD_MS = 200;
 function rowsCache() {
   let last = null;
   return (m) => {
@@ -1190,19 +1287,31 @@ var BeadsView = class extends View {
   // The rows the list drew last, [start, end): what is on screen, which the model does not know.
   seen = null;
   mono = "";
+  // Set only on the tab-bar button's copy (props role "toggle"): the Viewer it last saw in the focused tab.
+  toggle;
+  // The toggle copy's pane watch, or the Viewer's keyboard watch; cancelled on close.
+  poll;
+  // The Viewer's own pane in herdr, once known (see focusNav).
+  own = null;
   init(_props, cx) {
     this.cx = cx;
     this.host = realHost(cx);
-    this.root = viewedRepo(this.host);
+    if (isToggle(this.host.props())) {
+      this.toggle = { pane: beadsPane(this.host.panes(), this.host.focused()) };
+      this.poll = watchToggle(cx, this.host, this.toggle);
+      return;
+    }
+    const { root, model } = start(this.host);
+    this.root = root;
     this.store = new Store(
       this.host,
       this.root,
       (job) => cx.spawn(job),
-      (before, model, msg) => {
-        this.sync(before, model, msg);
+      (before, model2, msg) => {
+        this.sync(before, model2, msg);
         this.cx.notify();
       },
-      initModel(openerOf(decodeProps(this.host.props()).opener, decodeFocus(this.host.focused()), decodePanes(this.host.panes())))
+      model
     );
     this.mono = decodeFont(this.host.settings());
     this.nav = cx.focus_handle();
@@ -1215,6 +1324,12 @@ var BeadsView = class extends View {
     this.reason = InputState.new({ placeholder: "Reason" });
     this.reason.on("submit", () => this.dispatch({ _tag: "CloseWith", reason: this.reason.value() }));
     cx.spawn(() => this.listen());
+    this.focusNav();
+    this.poll = cx.timer.every(KEYBOARD_MS, () => {
+      if (!this.store.closed && takesKeyboard(this.own, decodeFocus(this.host.focused())?.pane ?? null, this.nav.is_focused(), this.store.model)) {
+        this.nav.focus();
+      }
+    });
     if (this.root !== null) {
       this.dispatch({ _tag: "Refresh" });
       this.dispatch({ _tag: "ReadStatuses" });
@@ -1225,13 +1340,30 @@ var BeadsView = class extends View {
     while (!this.store.closed) {
       try {
         if (await this.host.nextCommand() === "focus" && !this.store.closed) {
-          this.nav.focus();
+          this.focusNav();
         }
       } catch {
         return null;
       }
     }
     return null;
+  }
+  // The keyboard to the Viewer, and again once the root is drawn with its handle, as herdr-review does. herdr's focus is
+  // on this pane whenever this runs for an open or a "focus", so that is when the Viewer learns which pane is its own.
+  focusNav() {
+    this.nav.focus();
+    this.cx.timer.after(300, () => {
+      if (this.store.closed) {
+        return;
+      }
+      const f = decodeFocus(this.host.focused());
+      if (f !== null && f.terminal === null && f.pane !== null) {
+        this.own = f.pane;
+      }
+      if (!this.store.model.searching && this.store.model.menu === null) {
+        this.nav.focus();
+      }
+    });
   }
   dispatch(msg) {
     this.store.dispatch(msg);
@@ -1262,15 +1394,19 @@ var BeadsView = class extends View {
   }
   render(_cx) {
     const t = this.host.theme();
-    if (this.root === null) {
-      return div2().size_full().p(14).bg(t.background).text_color(t.muted).child("Open from a terminal");
+    if (this.toggle !== void 0) {
+      return drawToggle(this.toggle.pane !== null, t, () => clickToggle(this.host));
     }
     const target = pickTarget(this.store.model.opener, decodePanes(this.host.panes()), decodeAgents(this.host.agents()));
-    const ui = { target, nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start, end) => this.seen = [start, end] };
+    const ui = { target, root: this.root, nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start2, end) => this.seen = [start2, end] };
     return draw(this.store.model, this.rows(this.store.model), t, (msg) => this.dispatch(msg), ui, Date.now());
   }
   // Bounded: set the flag and let the replies in flight be dropped.
   close(_cx) {
+    this.poll?.cancel();
+    if (this.toggle !== void 0) {
+      return;
+    }
     this.store.close();
     this.search.release();
     this.reason.release();

@@ -1,10 +1,13 @@
 // The reducer: (Model, Msg) -> (Model, Cmd[]). Pure. Single flight: a refresh during a load is dropped.
 import { BUILT_IN_STATUSES, initFilters, initSort, isWide, reselect, sendText, shownBead, shownId, visible } from "./rows.ts";
+import { emptyState } from "./states.ts";
 import type { Cmd, Detail, Model, Msg, Opener, Part, PartName, Res, Timer } from "./types.ts";
 
 export const initModel = (opener: Opener = { terminal: null, tab: null }): Model => ({
   snapshot: null,
   loading: false,
+  loads: 0,
+  slow: false,
   error: null,
   filters: initFilters(),
   sort: initSort(),
@@ -94,8 +97,17 @@ const toList = (m: Model): Model => ({ ...m, pane: "list", shown: null, back: []
 
 function step(m: Model, msg: Msg): [Model, Cmd[]] {
   switch (msg._tag) {
-    case "Refresh":
-      return m.loading ? [m, []] : [{ ...m, loading: true }, [{ _tag: "Load" }]];
+    case "Refresh": {
+      // No bd runs when there is nothing to ask it about, and a refresh during a load is dropped.
+      if (m.loading || m.error?._tag === "NoOpener" || m.error?._tag === "RemoteSpace") {
+        return [m, []];
+      }
+      const loads = m.loads + 1;
+      // Only a first load has no list to keep on screen, so only it waits to show a spinner.
+      return [{ ...m, loading: true, loads, slow: false }, m.snapshot === null ? [{ _tag: "Load" }, { _tag: "WaitLoad", n: loads }] : [{ _tag: "Load" }]];
+    }
+    case "Slowed":
+      return [m.loading && m.snapshot === null && msg.n === m.loads ? { ...m, slow: true } : m, []];
     case "Loaded": {
       if (m.reload) {
         return [{ ...m, reload: false }, [{ _tag: "Load" }]];
@@ -103,10 +115,10 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
       // A failed load keeps the last good list and records the error.
       const writing = new Map([...m.writing].filter(([, s]) => s === "running"));
       if (!msg.res.ok) {
-        return [{ ...m, loading: false, error: msg.res.error, writing }, []];
+        return [{ ...m, loading: false, slow: false, error: msg.res.error, writing }, []];
       }
       // The beads may have changed, so no cached detail is kept; the shown one reloads under what it showed.
-      const next = reselect({ ...m, loading: false, error: null, snapshot: msg.res.value, writing });
+      const next = reselect({ ...m, loading: false, slow: false, error: null, snapshot: msg.res.value, writing });
       const id = shownId(next);
       if (id === null) {
         return [{ ...next, details: new Map() }, []];
@@ -177,7 +189,8 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
       return [{ ...m, menu: m.menu === msg.menu ? null : msg.menu }, []];
     }
     case "ToggleHelp":
-      return [{ ...m, help: !m.help, menu: null }, []];
+      // The keys panel is part of the viewer, which an empty screen replaces: toggling it there would pop it open unseen later.
+      return emptyState(m, null) !== null ? [m, []] : [{ ...m, help: !m.help, menu: null }, []];
     case "Shown":
       return [patch(m, msg.id, "show", msg.gen, { show: toPart(msg.res) }), []];
     case "Tree":

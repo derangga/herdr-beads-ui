@@ -136,7 +136,7 @@ test("Copy: nothing while a send has the clipboard", () => {
 
 test("opener: the tab is the Opener's pane's, else the focused tab, else none", () => {
   const listed = [pane("p1", "t1", { tab: "b7" })];
-  const f = { cwd: null, terminal: "t5", tab: "b2" };
+  const f = { cwd: null, terminal: "t5", tab: "b2", pane: "p5" };
   assert.deepEqual(openerOf(null, f, listed), { terminal: "t5", tab: "b2" });
   assert.deepEqual(openerOf("t1", f, listed), { terminal: "t1", tab: "b7" });
   // A terminal the panes do not list, as when the Opener was a mod pane: the focused tab stands in.

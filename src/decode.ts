@@ -163,7 +163,8 @@ export function decodeFocus(v: unknown): Focus | null {
     return null;
   }
   const o = v as Obj;
-  return { cwd: typeof o.cwd === "string" ? o.cwd : null, terminal: typeof o.terminal === "string" ? o.terminal : null, tab: typeof o.tab === "string" ? o.tab : null };
+  const text = (x: unknown): string | null => (typeof x === "string" ? x : null);
+  return { cwd: text(o.cwd), terminal: text(o.terminal), tab: text(o.tab), pane: text(o.pane) };
 }
 
 // The props the viewer reads: the folder it was opened for, and the terminal it was opened from.
@@ -186,6 +187,11 @@ export function decodePanes(v: unknown): PaneRef[] {
 
 export function decodeAgents(v: unknown): AgentRef[] {
   return records(v).flatMap((o) => (typeof o.pane === "string" && typeof o.tab === "string" && typeof o.seq === "number" ? [{ pane: o.pane, tab: o.tab, seq: o.seq, name: name(o) }] : []));
+}
+
+// Whether the space holding this tab lives on another machine. Unknown (no tab, no such space) is local.
+export function isRemoteTab(spaces: unknown, tab: string | null): boolean {
+  return tab !== null && records(spaces).some((o) => typeof o.machine === "string" && o.machine !== "" && records(o.tabs).some((t) => t.id === tab));
 }
 
 export const FALLBACK_MONO = "Menlo";

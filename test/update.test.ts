@@ -13,7 +13,8 @@ const rejected: BdError = { _tag: "BdRejected", code: 1, text: "boom" };
 test("refresh starts one load", () => {
   const [m, cmds] = update(initModel(), { _tag: "Refresh" });
   assert.equal(m.loading, true);
-  assert.deepEqual(cmds, [{ _tag: "Load" }]);
+  // A first load has no list to keep on screen, so it also starts the timer for the spinner.
+  assert.deepEqual(cmds, [{ _tag: "Load" }, { _tag: "WaitLoad", n: 1 }]);
 });
 
 test("a refresh while a load is running is dropped", () => {

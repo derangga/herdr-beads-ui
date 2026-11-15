@@ -1,6 +1,9 @@
 // Plain data: what bd gives back, decoded, and the errors the runner can name. Field names are bd's own.
 
 export type BdError =
+  // The first two are not bd's: the Viewer knows it cannot ask bd, so no bd runs.
+  | { _tag: "NoOpener" }
+  | { _tag: "RemoteSpace" }
   | { _tag: "NoDatabase"; text: string }
   | { _tag: "BdMissing"; text: string }
   | { _tag: "BdTimeout"; text: string }
@@ -76,7 +79,7 @@ export type Target = { terminal: string; name: string };
 // Nothing was pasted in any of these.
 export type SendError = { _tag: "NoTarget" } | { _tag: "TargetGone" } | { _tag: "SendRejected"; text: string };
 
-export type Focus = { cwd: string | null; terminal: string | null; tab: string | null };
+export type Focus = { cwd: string | null; terminal: string | null; tab: string | null; pane: string | null };
 
 // What one load builds: every bead, the ids `bd ready` named, and id -> blocked_by_count from `bd blocked`.
 export type Snapshot = { beads: Bead[]; ready: Set<string>; locks: Map<string, number> };
@@ -107,6 +110,9 @@ export type Model = {
   // The last good load: a failed load leaves it alone.
   snapshot: Snapshot | null;
   loading: boolean;
+  // The load number a first load's 150 ms timer must carry, and whether that load has run long enough for "Loading beads" to show.
+  loads: number;
+  slow: boolean;
   error: BdError | null;
   filters: Filters;
   sort: Sort;
@@ -151,6 +157,8 @@ export type Model = {
 export type Msg =
   | { _tag: "Refresh" }
   | { _tag: "Loaded"; res: Res<Snapshot> }
+  // The first load of load number `n` is still running 150 ms on.
+  | { _tag: "Slowed"; n: number }
   | { _tag: "ToggleReady" }
   | { _tag: "SetStatus"; status: string }
   | { _tag: "SetType"; type: string }
@@ -201,6 +209,7 @@ export type Timer = "fetch" | "loading";
 // Plain data the runner executes and answers with a Msg.
 export type Cmd =
   | { _tag: "Load" }
+  | { _tag: "WaitLoad"; n: number }
   | { _tag: "Fetch"; id: string; part: PartName; gen: number }
   | { _tag: "Wait"; id: string; gen: number; timer: Timer }
   | { _tag: "Statuses" }

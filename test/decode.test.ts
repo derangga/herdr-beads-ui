@@ -177,8 +177,8 @@ test("a decode failure without a known version carries null", () => {
 });
 
 test("focus: cwd and terminal, null when absent or of another type", () => {
-  assert.deepEqual(decodeFocus({ cwd: "/r", terminal: "t1", tab: "b1", pane: "p1" }), { cwd: "/r", terminal: "t1", tab: "b1" });
-  assert.deepEqual(decodeFocus({ cwd: 3 }), { cwd: null, terminal: null, tab: null });
+  assert.deepEqual(decodeFocus({ cwd: "/r", terminal: "t1", tab: "b1", pane: "p1" }), { cwd: "/r", terminal: "t1", tab: "b1", pane: "p1" });
+  assert.deepEqual(decodeFocus({ cwd: 3 }), { cwd: null, terminal: null, tab: null, pane: null });
   assert.equal(decodeFocus(null), null);
   assert.equal(decodeFocus("x"), null);
 });

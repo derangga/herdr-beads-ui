@@ -2,7 +2,7 @@
 import { initFilters, initSort, isWide, reselect, shownId, visible } from "./rows.ts";
 import type { Cmd, Detail, Model, Msg, Part, PartName, Res, Timer } from "./types.ts";
 
-export const initModel = (): Model => ({ snapshot: null, loading: false, error: null, filters: initFilters(), sort: initSort(), selected: null, details: new Map(), gen: 0, width: 0, pane: "list", searching: false, menu: null, help: false });
+export const initModel = (): Model => ({ snapshot: null, loading: false, error: null, filters: initFilters(), sort: initSort(), selected: null, shown: null, back: [], forward: [], details: new Map(), gen: 0, width: 0, pane: "list", searching: false, menu: null, help: false });
 
 // A load fills the list, so the viewer opens by sending Refresh. After every message the shown bead's detail is started if it is missing.
 export function update(m: Model, msg: Msg): [Model, Cmd[]] {
@@ -55,6 +55,16 @@ function settle(m: Model): [Model, Cmd[]] {
   return [{ ...m, gen, details: details.set(id, d) }, cmds];
 }
 
+// A list action puts the detail back on the selected bead, whatever a link had shown.
+const pick = (m: Model, id: string): Model => ({ ...m, selected: id, shown: null });
+
+// Shows a bead by link or from the history. The list selects it when its filters let it through, else it keeps its selection and the
+// bead is shown beside it (the detail says it is hidden).
+const land = (m: Model, id: string): Model => (visible(m).some((b) => b.id === id) ? pick(m, id) : { ...m, shown: id });
+
+// The detail that fills the Viewer closes, and with it the history of that visit.
+const toList = (m: Model): Model => ({ ...m, pane: "list", shown: null, back: [], forward: [] });
+
 function step(m: Model, msg: Msg): [Model, Cmd[]] {
   switch (msg._tag) {
     case "Refresh":
@@ -87,13 +97,13 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
     case "Reverse":
       return [{ ...m, sort: { ...m.sort, reverse: !m.sort.reverse } }, []];
     case "Select":
-      return [{ ...m, selected: msg.id }, []];
+      return [pick(m, msg.id), []];
     case "Move":
       // The keys panel covers the list, so a move would change a selection nobody can see.
       return [m.pane === "list" && !m.help ? move(m, msg.delta) : m, []];
     case "Click":
       // A click opens the detail when it fills the Viewer, and only selects when the list sits beside it.
-      return [{ ...m, selected: msg.id, menu: null, searching: false, pane: isWide(m) ? "list" : "detail" }, []];
+      return [{ ...pick(m, msg.id), menu: null, searching: false, pane: isWide(m) ? "list" : "detail" }, []];
     case "Enter":
       if (m.searching) {
         return [{ ...m, searching: false }, []];
@@ -104,7 +114,19 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
     case "Tab":
       return [isWide(m) && !m.help ? { ...m, pane: m.pane === "list" ? "detail" : "list" } : m, []];
     case "BackToList":
-      return [{ ...m, pane: "list", help: false }, []];
+      return [{ ...toList(m), help: false }, []];
+    case "Jump": {
+      const cur = shownId(m);
+      return cur === null || cur === msg.id ? [m, []] : [land({ ...m, back: [...m.back, cur], forward: [] }, msg.id), []];
+    }
+    case "Walk": {
+      const cur = shownId(m);
+      const id = (msg.delta < 0 ? m.back : m.forward).at(-1);
+      if (cur === null || id === undefined || m.help) {
+        return [m, []];
+      }
+      return [land({ ...m, ...(msg.delta < 0 ? { back: m.back.slice(0, -1), forward: [...m.forward, cur] } : { back: [...m.back, cur], forward: m.forward.slice(0, -1) }) }, id), []];
+    }
     case "Resized":
       // Only the width: the selection, the filters, the search and the pane stay, so crossing a breakpoint redraws the same state.
       return [msg.width === m.width ? m : { ...m, width: msg.width }, []];
@@ -146,7 +168,7 @@ function move(m: Model, delta: number): Model {
   const rows = visible(m);
   const at = rows.findIndex((b) => b.id === m.selected);
   const next = rows[at < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, at + delta))];
-  return next === undefined || next.id === m.selected ? m : { ...m, selected: next.id };
+  return next === undefined || (next.id === m.selected && m.shown === null) ? m : pick(m, next.id);
 }
 
 // Esc closes the nearest thing: a menu, the keys panel, the search box (emptied), then the detail that fills the Viewer.
@@ -160,5 +182,5 @@ function escape(m: Model): Model {
   if (m.searching) {
     return reselect({ ...m, searching: false, filters: { ...m.filters, search: "" } });
   }
-  return m.pane === "detail" && !isWide(m) ? { ...m, pane: "list" } : m;
+  return m.pane === "detail" && !isWide(m) ? toList(m) : m;
 }

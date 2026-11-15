@@ -53,6 +53,10 @@ export type TreeNode = {
   edge_from_parent: string | null;
 };
 
+// One row of a dependency tree, depth 0 left out. `guides[i]` says the guide line of ancestor level i + 1 goes on past this row,
+// `last` that this row ends its siblings, `repeat` that the id was already drawn higher up.
+export type TreeRow = { id: string; title: string; status: string; edge: string; depth: number; guides: boolean[]; last: boolean; repeat: boolean };
+
 export type Comment = { id: string; author: string; text: string; created_at: string };
 
 export type StatusInfo = { name: string; icon: string; category: string };
@@ -93,6 +97,12 @@ export type Model = {
   filters: Filters;
   sort: Sort;
   selected: string | null;
+  // The bead on display when a link or the history put it there instead of the list: null means the selected one. The list keeps
+  // its filters and its selection, so a bead the filters hide can still be shown.
+  shown: string | null;
+  // The beads shown before this one, and the ones left by going back. The shown bead itself is not in either.
+  back: string[];
+  forward: string[];
   // Detail by bead id: the shown bead's calls, and the beads shown before whose calls all finished. A good load empties it.
   details: Map<string, Detail>;
   // The last request number handed out to a detail call.
@@ -122,6 +132,10 @@ export type Msg =
   | { _tag: "Escape" }
   | { _tag: "Tab" }
   | { _tag: "BackToList" }
+  // An id in the detail was clicked.
+  | { _tag: "Jump"; id: string }
+  // -1 goes back in the history, 1 forward.
+  | { _tag: "Walk"; delta: -1 | 1 }
   | { _tag: "Resized"; width: number }
   | { _tag: "FocusSearch" }
   | { _tag: "SearchFocused"; on: boolean }

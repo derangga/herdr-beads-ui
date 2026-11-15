@@ -1,5 +1,5 @@
 // Filtering, search and sorting of the loaded beads. Pure: bd is never run here.
-import type { Bead, BeadDetail, Filters, Model, Msg, Sort, SortKey } from "./types.ts";
+import type { Bead, BeadDetail, Filters, Model, Msg, Sort, SortKey, TreeNode, TreeRow } from "./types.ts";
 
 export const NOT_CLOSED = "not closed";
 export const ALL = "all";
@@ -57,14 +57,43 @@ export function reselect(m: Model): Model {
   return rows.some((b) => b.id === m.selected) ? m : { ...m, selected: rows[0]?.id ?? null };
 }
 
-// The bead whose detail is on screen: the selected one beside the list, or once opened when the detail fills the Viewer.
-export const shownId = (m: Pick<Model, "selected" | "width" | "pane">): string | null => (m.selected !== null && (isWide(m) || m.pane === "detail") ? m.selected : null);
+// The bead whose detail is on screen: the one a link put there, else the selected one, beside the list or once opened when the
+// detail fills the Viewer.
+export const shownId = (m: Pick<Model, "selected" | "shown" | "width" | "pane">): string | null => (isWide(m) || m.pane === "detail" ? (m.shown ?? m.selected) : null);
 
 // The shown bead is not in the filtered list, which happens when it was reached by a link or the filters changed under it.
-export const hiddenByFilters = (m: Pick<Model, "selected" | "width" | "pane">, rows: Bead[]): boolean => {
+export const hiddenByFilters = (m: Pick<Model, "selected" | "shown" | "width" | "pane">, rows: Bead[]): boolean => {
   const id = shownId(m);
   return id !== null && !rows.some((b) => b.id === id);
 };
+
+// A dependency tree as rows, depth 0 (the bead itself) left out. Nesting comes from parent_id, siblings keep bd's order, so the order
+// bd lists the nodes in does not matter. An id already drawn higher up, the bead itself included, is a repeat and is not walked again.
+// A row's guides say which ancestor levels have a later sibling, `last` that the row ends its siblings.
+export function treeRows(nodes: TreeNode[]): TreeRow[] {
+  const kids = new Map<string, TreeNode[]>();
+  for (const n of nodes) {
+    if (n.depth > 0) {
+      kids.set(n.parent_id, [...(kids.get(n.parent_id) ?? []), n]);
+    }
+  }
+  const roots = nodes.filter((n) => n.depth === 0);
+  const seen = new Set(roots.map((n) => n.id));
+  const rows: TreeRow[] = [];
+  const walk = (parent: string, guides: boolean[]): void => {
+    const list = kids.get(parent) ?? [];
+    list.forEach((n, i) => {
+      const [last, repeat] = [i === list.length - 1, seen.has(n.id)];
+      seen.add(n.id);
+      rows.push({ id: n.id, title: n.title, status: n.status, edge: n.edge_from_parent ?? "", depth: guides.length + 1, guides, last, repeat });
+      if (!repeat) {
+        walk(n.id, [...guides, !last]);
+      }
+    });
+  };
+  roots.forEach((r) => walk(r.id, []));
+  return rows;
+}
 
 // The detail's markdown sections, only those with text.
 export const textSections = (d: BeadDetail): [string, string][] =>
@@ -154,6 +183,10 @@ export function keyFor(m: Model, keystroke: string): Msg | null {
       return { _tag: "FocusSearch" };
     case "ctrl-r":
       return { _tag: "Refresh" };
+    case "[":
+      return { _tag: "Walk", delta: -1 };
+    case "]":
+      return { _tag: "Walk", delta: 1 };
     case "?":
     case "shift-/":
     case "shift-?":

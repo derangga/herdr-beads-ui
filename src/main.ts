@@ -97,6 +97,10 @@ export default class BeadsView extends View {
       // Enter or Esc in the box gives the keyboard back to the Viewer.
       this.nav.focus();
     }
+    // The list was not drawn while the detail filled the Viewer, so what `seen` says is old when it comes back.
+    if (before.pane === "detail" && model.pane === "list") {
+      this.seen = null;
+    }
     // After every change, since a sort, a filter or a reload moves the selected row without changing which bead is selected.
     // Only a row off screen scrolls: the default pins it to the nearest edge, so scrolling a visible one would jump it.
     const at = this.rows(model).findIndex((b) => b.id === model.selected);

@@ -4,8 +4,8 @@ import { div, svg, uniform_list } from "gpui-kit";
 import type { Element, FocusHandle } from "gpui-kit";
 import { h_flex, Input, Popup, Scrollbar, TextView, v_flex } from "gpui-base";
 import type { InputState, VirtualListScrollHandle } from "gpui-base";
-import { age, ALL, fullDate, hiddenByFilters, idChars, isWide, keyFor, listWidth, NO_AGE_BELOW, NOT_CLOSED, ROW_H, shownId, SORT_KEYS, statusOptions, textSections, typeOptions } from "./rows.ts";
-import type { BdError, Bead, BeadDetail, Detail, Menu, Model, Msg, Part, PartName } from "./types.ts";
+import { age, ALL, fullDate, hiddenByFilters, idChars, isWide, keyFor, listWidth, NO_AGE_BELOW, NOT_CLOSED, ROW_H, shownId, SORT_KEYS, statusOptions, textSections, treeRows, typeOptions } from "./rows.ts";
+import type { BdError, Bead, BeadDetail, Detail, Menu, Model, Msg, Part, PartName, TreeNode, TreeRow } from "./types.ts";
 
 export type Theme = Record<string, `#${string}`>;
 type Dispatch = (msg: Msg) => void;
@@ -99,6 +99,35 @@ function iconButton(id: string, name: string, tip: string, t: Theme, click: () =
         .flex_none()
         .when(spin, (e) => e.spin(900)),
     );
+}
+
+// ‹ and › of the detail header: dimmed, and dead, when the history has nothing on that side.
+function walkButton(id: string, glyph: string, tip: string, on: boolean, t: Theme, click: () => void): Element {
+  return div()
+    .id(id)
+    .w(26)
+    .h(26)
+    .flex_none()
+    .flex()
+    .items_center()
+    .justify_center()
+    .rounded(6)
+    .text_size(16)
+    .text_color(t.muted)
+    .opacity(on ? 1 : 0.35)
+    .when(on, (e) =>
+      e
+        .tooltip(tip)
+        .cursor_pointer()
+        .hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .active((s) => s.bg(t.selected))
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          click();
+        }),
+    )
+    .accessibility_label(tip)
+    .child(glyph);
 }
 
 const SORT_LABEL = (key: string): string => key.charAt(0).toUpperCase() + key.slice(1);
@@ -206,7 +235,8 @@ function topBar(m: Model, t: Theme, dispatch: Dispatch, ui: Ui, wide: boolean): 
 
 function row(b: Bead, m: Model, t: Theme, narrow: boolean, now: number, idW: number, mono: string): Element {
   const closed = b.status === "closed";
-  const selected = b.id === m.selected;
+  // A bead a link put on show is the one the list marks; when the filters hide it no row is marked.
+  const selected = b.id === (shownId(m) ?? m.selected);
   const dim = (c: `#${string}`): `#${string}` => (closed ? t.muted : c);
   const locks = m.snapshot?.locks.get(b.id) ?? 0;
   const status = statusColor(b.status, t);
@@ -309,6 +339,7 @@ const KEYS: [string, string][] = [
   ["↵", "Open the detail (narrow) or focus it (wide)"],
   ["Esc", "Back to the list (narrow), clear the search, close a menu"],
   ["Tab", "Switch focus between list and detail (wide)"],
+  ["[ ]", "Back and forward in the history"],
   ["/", "Search"],
   ["Ctrl+R", "Refresh"],
   ["?", "Show or hide these keys"],
@@ -339,6 +370,75 @@ const red = (t: Theme): `#${string}` => pick(t, "red", "ansi1");
 // A section that failed: what bd said, and a button that reruns only that call.
 function failed(label: string, error: BdError, part: PartName, t: Theme, dispatch: Dispatch): Element {
   return section(label, t, div().text_size(12).text_color(red(t)).child(bdText(error)), h_flex().child(button(`retry-${part}`, "Retry", false, t, () => dispatch({ _tag: "Retry", part }))));
+}
+
+const GUIDE = 14;
+
+// One row of a tree: its guide lines, a status dot, the id as a link, the title and the edge type. A row repeated from higher up is dimmed.
+function treeRow(r: TreeRow, key: string, t: Theme, dispatch: Dispatch, mono: string): Element {
+  const line = (e: Element): Element => e.border_l(1).border_color(t.border);
+  const own = r.last
+    ? div()
+        .w(GUIDE)
+        .h(ROW_H)
+        .flex_none()
+        .child(
+          line(
+            div()
+              .w(10)
+              .h(ROW_H / 2),
+          ).border_b(1),
+        )
+    : line(div().w(GUIDE).h(ROW_H).flex_none()).child(
+        div()
+          .w(10)
+          .h(ROW_H / 2)
+          .border_b(1)
+          .border_color(t.border),
+      );
+  return h_flex()
+    .h(ROW_H)
+    .flex_none()
+    .gap(6)
+    .items_center()
+    .text_size(12)
+    .opacity(r.repeat ? 0.5 : 1)
+    .child(
+      h_flex()
+        .flex_none()
+        .children([...r.guides.map((on) => (on ? line(div().w(GUIDE).h(ROW_H).flex_none()) : div().w(GUIDE).h(ROW_H).flex_none())), own]),
+    )
+    .child(div().w(8).h(8).flex_none().rounded(4).bg(statusColor(r.status, t)))
+    .child(
+      div()
+        .id(key)
+        .flex_none()
+        .font_family(mono)
+        .text_size(11)
+        .text_color(t.accent)
+        .cursor_pointer()
+        .hover((s) => s.underline())
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          dispatch({ _tag: "Jump", id: r.id });
+        })
+        .child(r.id),
+    )
+    .child(div().flex_1().min_w(0).truncate().child(r.title))
+    .child(div().flex_none().text_size(11).text_color(t.muted).child(r.edge));
+}
+
+// A tree section. A reload keeps the old rows on screen; before the first reply there is nothing to draw.
+function tree(label: string, part: "down" | "up", p: Part<TreeNode[]>, empty: string, t: Theme, dispatch: Dispatch, mono: string): Element[] {
+  if (p._tag === "Failed") {
+    return [failed(label, p.error, part, t, dispatch)];
+  }
+  const nodes = p._tag === "Ready" ? p.value : p.prev;
+  if (nodes === null) {
+    return [];
+  }
+  const rows = treeRows(nodes);
+  return [section(`${label} (${rows.length})`, t, ...(rows.length === 0 ? [div().text_size(12).text_color(t.muted).child(empty)] : rows.map((r, i) => treeRow(r, `${part}-${i}`, t, dispatch, mono))))];
 }
 
 function metaRow(b: BeadDetail, t: Theme, ui: Ui, now: number): Element {
@@ -402,11 +502,8 @@ function beadBody(d: BeadDetail, e: Detail, hidden: boolean, t: Theme, dispatch:
             ),
         ]),
     ...textSections(d).map(([label, text]) => section(label, t, markdown(`md-${d.id}-${label}`, text))),
-    // The trees are drawn by the next piece of work; only a failure shows for now.
-    ...(["down", "up"] as const).flatMap((part) => {
-      const p = e[part];
-      return p._tag === "Failed" ? [failed(part === "down" ? "Blocked by" : "Blocks", p.error, part, t, dispatch)] : [];
-    }),
+    ...tree("Blocked by", "down", e.down, "Nothing blocks this bead.", t, dispatch, ui.mono),
+    ...tree("Blocks", "up", e.up, "This bead blocks nothing.", t, dispatch, ui.mono),
     ...(e.comments._tag === "Failed" ? [failed("Comments", e.comments.error, "comments", t, dispatch)] : []),
     ...(sorted.length === 0
       ? []
@@ -477,16 +574,17 @@ function detailPane(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui
       .min_h(0)
       // Beside the list, an accent edge says which column has the keyboard.
       .when(!narrow, (e) => e.border_l(2).border_color(m.pane === "detail" ? t.accent : t.border))
-      .when(narrow, (e) =>
-        e.child(
-          h_flex()
-            .h(36)
-            .flex_none()
-            .px(8)
-            .items_center()
-            .border_b(1)
-            .border_color(t.border)
-            .child(
+      .child(
+        h_flex()
+          .h(36)
+          .flex_none()
+          .px(8)
+          .gap(4)
+          .items_center()
+          .border_b(1)
+          .border_color(t.border)
+          .when(narrow, (e) =>
+            e.child(
               h_flex()
                 .id("back")
                 .h(26)
@@ -507,7 +605,9 @@ function detailPane(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui
                 .child(svg(icon("chevron-left")).size(14).flex_none())
                 .child("List"),
             ),
-        ),
+          )
+          .child(walkButton("history-back", "‹", "Back ([)", m.back.length > 0, t, () => dispatch({ _tag: "Walk", delta: -1 })))
+          .child(walkButton("history-forward", "›", "Forward (])", m.forward.length > 0, t, () => dispatch({ _tag: "Walk", delta: 1 }))),
       )
       .child(
         m.help

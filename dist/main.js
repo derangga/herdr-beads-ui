@@ -207,11 +207,35 @@ function reselect(m) {
   const rows = visible(m);
   return rows.some((b) => b.id === m.selected) ? m : { ...m, selected: rows[0]?.id ?? null };
 }
-var shownId = (m) => m.selected !== null && (isWide(m) || m.pane === "detail") ? m.selected : null;
+var shownId = (m) => isWide(m) || m.pane === "detail" ? m.shown ?? m.selected : null;
 var hiddenByFilters = (m, rows) => {
   const id = shownId(m);
   return id !== null && !rows.some((b) => b.id === id);
 };
+function treeRows(nodes) {
+  const kids = /* @__PURE__ */ new Map();
+  for (const n of nodes) {
+    if (n.depth > 0) {
+      kids.set(n.parent_id, [...kids.get(n.parent_id) ?? [], n]);
+    }
+  }
+  const roots = nodes.filter((n) => n.depth === 0);
+  const seen = new Set(roots.map((n) => n.id));
+  const rows = [];
+  const walk = (parent, guides) => {
+    const list = kids.get(parent) ?? [];
+    list.forEach((n, i) => {
+      const [last, repeat] = [i === list.length - 1, seen.has(n.id)];
+      seen.add(n.id);
+      rows.push({ id: n.id, title: n.title, status: n.status, edge: n.edge_from_parent ?? "", depth: guides.length + 1, guides, last, repeat });
+      if (!repeat) {
+        walk(n.id, [...guides, !last]);
+      }
+    });
+  };
+  roots.forEach((r) => walk(r.id, []));
+  return rows;
+}
 var textSections = (d) => [
   ["Description", d.description],
   ["Design", d.design],
@@ -275,6 +299,10 @@ function keyFor(m, keystroke) {
       return { _tag: "FocusSearch" };
     case "ctrl-r":
       return { _tag: "Refresh" };
+    case "[":
+      return { _tag: "Walk", delta: -1 };
+    case "]":
+      return { _tag: "Walk", delta: 1 };
     case "?":
     case "shift-/":
     case "shift-?":
@@ -398,7 +426,7 @@ async function run2(host, root, cmd) {
 }
 
 // src/update.ts
-var initModel = () => ({ snapshot: null, loading: false, error: null, filters: initFilters(), sort: initSort(), selected: null, details: /* @__PURE__ */ new Map(), gen: 0, width: 0, pane: "list", searching: false, menu: null, help: false });
+var initModel = () => ({ snapshot: null, loading: false, error: null, filters: initFilters(), sort: initSort(), selected: null, shown: null, back: [], forward: [], details: /* @__PURE__ */ new Map(), gen: 0, width: 0, pane: "list", searching: false, menu: null, help: false });
 function update(m, msg) {
   const [next, cmds] = step(m, msg);
   const [settled, more] = settle(next);
@@ -438,6 +466,9 @@ function settle(m) {
   const [d, cmds] = begin(id, gen, void 0, true);
   return [{ ...m, gen, details: details.set(id, d) }, cmds];
 }
+var pick = (m, id) => ({ ...m, selected: id, shown: null });
+var land = (m, id) => visible(m).some((b) => b.id === id) ? pick(m, id) : { ...m, shown: id };
+var toList = (m) => ({ ...m, pane: "list", shown: null, back: [], forward: [] });
 function step(m, msg) {
   switch (msg._tag) {
     case "Refresh":
@@ -468,11 +499,11 @@ function step(m, msg) {
     case "Reverse":
       return [{ ...m, sort: { ...m.sort, reverse: !m.sort.reverse } }, []];
     case "Select":
-      return [{ ...m, selected: msg.id }, []];
+      return [pick(m, msg.id), []];
     case "Move":
       return [m.pane === "list" && !m.help ? move(m, msg.delta) : m, []];
     case "Click":
-      return [{ ...m, selected: msg.id, menu: null, searching: false, pane: isWide(m) ? "list" : "detail" }, []];
+      return [{ ...pick(m, msg.id), menu: null, searching: false, pane: isWide(m) ? "list" : "detail" }, []];
     case "Enter":
       if (m.searching) {
         return [{ ...m, searching: false }, []];
@@ -483,7 +514,19 @@ function step(m, msg) {
     case "Tab":
       return [isWide(m) && !m.help ? { ...m, pane: m.pane === "list" ? "detail" : "list" } : m, []];
     case "BackToList":
-      return [{ ...m, pane: "list", help: false }, []];
+      return [{ ...toList(m), help: false }, []];
+    case "Jump": {
+      const cur = shownId(m);
+      return cur === null || cur === msg.id ? [m, []] : [land({ ...m, back: [...m.back, cur], forward: [] }, msg.id), []];
+    }
+    case "Walk": {
+      const cur = shownId(m);
+      const id = (msg.delta < 0 ? m.back : m.forward).at(-1);
+      if (cur === null || id === void 0 || m.help) {
+        return [m, []];
+      }
+      return [land({ ...m, ...msg.delta < 0 ? { back: m.back.slice(0, -1), forward: [...m.forward, cur] } : { back: [...m.back, cur], forward: m.forward.slice(0, -1) } }, id), []];
+    }
     case "Resized":
       return [msg.width === m.width ? m : { ...m, width: msg.width }, []];
     case "FocusSearch":
@@ -522,7 +565,7 @@ function move(m, delta) {
   const rows = visible(m);
   const at = rows.findIndex((b) => b.id === m.selected);
   const next = rows[at < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, at + delta))];
-  return next === void 0 || next.id === m.selected ? m : { ...m, selected: next.id };
+  return next === void 0 || next.id === m.selected && m.shown === null ? m : pick(m, next.id);
 }
 function escape(m) {
   if (m.menu !== null) {
@@ -534,7 +577,7 @@ function escape(m) {
   if (m.searching) {
     return reselect({ ...m, searching: false, filters: { ...m.filters, search: "" } });
   }
-  return m.pane === "detail" && !isWide(m) ? { ...m, pane: "list" } : m;
+  return m.pane === "detail" && !isWide(m) ? toList(m) : m;
 }
 
 // src/store.ts
@@ -577,7 +620,7 @@ var Store = class {
 import { div, svg, uniform_list } from "gpui-kit";
 import { h_flex, Input, Popup, Scrollbar, TextView, v_flex } from "gpui-base";
 var icon = (name) => `mods/beads/icons/${name}.svg`;
-var pick = (t, ...keys) => {
+var pick2 = (t, ...keys) => {
   const found = keys.find((k) => t[k] !== void 0);
   return t[found ?? "muted"] ?? t.foreground;
 };
@@ -585,17 +628,17 @@ function peach(t) {
   if (t.peach !== void 0) {
     return t.peach;
   }
-  const [a, b] = [pick(t, "ansi1"), pick(t, "ansi3")];
+  const [a, b] = [pick2(t, "ansi1"), pick2(t, "ansi3")];
   const mix = (i) => Math.round((parseInt(a.slice(i, i + 2), 16) + parseInt(b.slice(i, i + 2), 16)) / 2).toString(16).padStart(2, "0");
   return /^#[0-9a-f]{6}$/i.test(a) && /^#[0-9a-f]{6}$/i.test(b) ? `#${mix(1)}${mix(3)}${mix(5)}` : b;
 }
 function priorityColor(p, t) {
-  return p <= 0 ? pick(t, "red", "ansi1") : p === 1 ? peach(t) : p === 2 ? pick(t, "yellow", "ansi3") : p === 3 ? pick(t, "blue", "ansi4") : t.muted;
+  return p <= 0 ? pick2(t, "red", "ansi1") : p === 1 ? peach(t) : p === 2 ? pick2(t, "yellow", "ansi3") : p === 3 ? pick2(t, "blue", "ansi4") : t.muted;
 }
 var STATUS_COLOR = { open: ["green", "ansi2"], in_progress: ["blue", "ansi4"], blocked: ["red", "ansi1"] };
 var statusColor = (status, t) => {
   const names = STATUS_COLOR[status];
-  return names === void 0 ? t.muted : pick(t, ...names);
+  return names === void 0 ? t.muted : pick2(t, ...names);
 };
 var STATUS_LABEL = { open: "OPEN", in_progress: "IN PROG", blocked: "BLOCKED", deferred: "DEFER", closed: "CLOSED" };
 var statusLabel = (status) => STATUS_LABEL[status] ?? status.toUpperCase().slice(0, 8);
@@ -613,6 +656,15 @@ function iconButton(id, name, tip, t, click, spin = false) {
   }).child(
     svg(icon(name)).size(14).flex_none().when(spin, (e) => e.spin(900))
   );
+}
+function walkButton(id, glyph, tip, on, t, click) {
+  return div().id(id).w(26).h(26).flex_none().flex().items_center().justify_center().rounded(6).text_size(16).text_color(t.muted).opacity(on ? 1 : 0.35).when(
+    on,
+    (e) => e.tooltip(tip).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
+      cx.stop_propagation();
+      click();
+    })
+  ).accessibility_label(tip).child(glyph);
 }
 var SORT_LABEL = (key) => key.charAt(0).toUpperCase() + key.slice(1);
 function searchBox(ui) {
@@ -661,11 +713,11 @@ function topBar(m, t, dispatch, ui, wide) {
 }
 function row(b, m, t, narrow, now, idW, mono) {
   const closed = b.status === "closed";
-  const selected = b.id === m.selected;
+  const selected = b.id === (shownId(m) ?? m.selected);
   const dim = (c) => closed ? t.muted : c;
   const locks = m.snapshot?.locks.get(b.id) ?? 0;
   const status = statusColor(b.status, t);
-  return h_flex().id(b.id).w_full().h(ROW_H).flex_none().pr(10).gap(6).items_center().text_size(12).cursor_pointer().text_color(closed ? t.muted : t.foreground).when(selected, (e) => e.bg(pick(t, "surface0", "raised"))).hover((s) => s.bg(t.hover)).child(
+  return h_flex().id(b.id).w_full().h(ROW_H).flex_none().pr(10).gap(6).items_center().text_size(12).cursor_pointer().text_color(closed ? t.muted : t.foreground).when(selected, (e) => e.bg(pick2(t, "surface0", "raised"))).hover((s) => s.bg(t.hover)).child(
     div().w(2).h_full().flex_none().when(selected, (e) => e.bg(t.accent))
   ).when(
     !narrow,
@@ -705,6 +757,7 @@ var KEYS = [
   ["\u21B5", "Open the detail (narrow) or focus it (wide)"],
   ["Esc", "Back to the list (narrow), clear the search, close a menu"],
   ["Tab", "Switch focus between list and detail (wide)"],
+  ["[ ]", "Back and forward in the history"],
   ["/", "Search"],
   ["Ctrl+R", "Refresh"],
   ["?", "Show or hide these keys"]
@@ -716,9 +769,39 @@ var bdText = (e) => "text" in e ? e.text : `bd ${e.version ?? "(version unknown)
 var heading = (label, t) => div().text_size(11).font_semibold().text_color(t.muted).child(label.toUpperCase());
 var section = (label, t, ...body) => v_flex().gap(4).flex_none().child(heading(label, t)).children(body);
 var markdown = (id, text2) => TextView.markdown(id, text2).selectable(true).scrollable(false).w_full().min_w(0);
-var red = (t) => pick(t, "red", "ansi1");
+var red = (t) => pick2(t, "red", "ansi1");
 function failed(label, error, part, t, dispatch) {
   return section(label, t, div().text_size(12).text_color(red(t)).child(bdText(error)), h_flex().child(button(`retry-${part}`, "Retry", false, t, () => dispatch({ _tag: "Retry", part }))));
+}
+var GUIDE = 14;
+function treeRow(r, key, t, dispatch, mono) {
+  const line = (e) => e.border_l(1).border_color(t.border);
+  const own = r.last ? div().w(GUIDE).h(ROW_H).flex_none().child(
+    line(
+      div().w(10).h(ROW_H / 2)
+    ).border_b(1)
+  ) : line(div().w(GUIDE).h(ROW_H).flex_none()).child(
+    div().w(10).h(ROW_H / 2).border_b(1).border_color(t.border)
+  );
+  return h_flex().h(ROW_H).flex_none().gap(6).items_center().text_size(12).opacity(r.repeat ? 0.5 : 1).child(
+    h_flex().flex_none().children([...r.guides.map((on) => on ? line(div().w(GUIDE).h(ROW_H).flex_none()) : div().w(GUIDE).h(ROW_H).flex_none()), own])
+  ).child(div().w(8).h(8).flex_none().rounded(4).bg(statusColor(r.status, t))).child(
+    div().id(key).flex_none().font_family(mono).text_size(11).text_color(t.accent).cursor_pointer().hover((s) => s.underline()).on_click((_e, cx) => {
+      cx.stop_propagation();
+      dispatch({ _tag: "Jump", id: r.id });
+    }).child(r.id)
+  ).child(div().flex_1().min_w(0).truncate().child(r.title)).child(div().flex_none().text_size(11).text_color(t.muted).child(r.edge));
+}
+function tree(label, part, p, empty, t, dispatch, mono) {
+  if (p._tag === "Failed") {
+    return [failed(label, p.error, part, t, dispatch)];
+  }
+  const nodes = p._tag === "Ready" ? p.value : p.prev;
+  if (nodes === null) {
+    return [];
+  }
+  const rows = treeRows(nodes);
+  return [section(`${label} (${rows.length})`, t, ...rows.length === 0 ? [div().text_size(12).text_color(t.muted).child(empty)] : rows.map((r, i) => treeRow(r, `${part}-${i}`, t, dispatch, mono)))];
 }
 function metaRow(b, t, ui, now) {
   const status = statusColor(b.status, t);
@@ -739,16 +822,13 @@ function beadBody(d, e, hidden, t, dispatch, ui, now) {
     ...d.labels.length === 0 ? [] : [
       h_flex().flex_wrap().gap(4).flex_none().children(
         d.labels.map(
-          (l) => div().px(6).py(1).rounded(4).bg(pick(t, "surface0", "raised")).text_size(11).text_color(t.muted).child(l)
+          (l) => div().px(6).py(1).rounded(4).bg(pick2(t, "surface0", "raised")).text_size(11).text_color(t.muted).child(l)
         )
       )
     ],
     ...textSections(d).map(([label, text2]) => section(label, t, markdown(`md-${d.id}-${label}`, text2))),
-    // The trees are drawn by the next piece of work; only a failure shows for now.
-    ...["down", "up"].flatMap((part) => {
-      const p = e[part];
-      return p._tag === "Failed" ? [failed(part === "down" ? "Blocked by" : "Blocks", p.error, part, t, dispatch)] : [];
-    }),
+    ...tree("Blocked by", "down", e.down, "Nothing blocks this bead.", t, dispatch, ui.mono),
+    ...tree("Blocks", "up", e.up, "This bead blocks nothing.", t, dispatch, ui.mono),
     ...e.comments._tag === "Failed" ? [failed("Comments", e.comments.error, "comments", t, dispatch)] : [],
     ...sorted.length === 0 ? [] : [
       section(
@@ -791,16 +871,16 @@ function detailBody(m, rows, t, dispatch, ui, now) {
 }
 function detailPane(m, rows, t, dispatch, ui, narrow, now) {
   const scroll = `detail-${shownId(m) ?? "none"}`;
-  return v_flex().flex_1().min_w(0).min_h(0).when(!narrow, (e) => e.border_l(2).border_color(m.pane === "detail" ? t.accent : t.border)).when(
-    narrow,
-    (e) => e.child(
-      h_flex().h(36).flex_none().px(8).items_center().border_b(1).border_color(t.border).child(
+  return v_flex().flex_1().min_w(0).min_h(0).when(!narrow, (e) => e.border_l(2).border_color(m.pane === "detail" ? t.accent : t.border)).child(
+    h_flex().h(36).flex_none().px(8).gap(4).items_center().border_b(1).border_color(t.border).when(
+      narrow,
+      (e) => e.child(
         h_flex().id("back").h(26).pl(4).pr(8).gap(2).items_center().rounded(6).text_size(12).text_color(t.muted).cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
           cx.stop_propagation();
           dispatch({ _tag: "BackToList" });
         }).child(svg(icon("chevron-left")).size(14).flex_none()).child("List")
       )
-    )
+    ).child(walkButton("history-back", "\u2039", "Back ([)", m.back.length > 0, t, () => dispatch({ _tag: "Walk", delta: -1 }))).child(walkButton("history-forward", "\u203A", "Forward (])", m.forward.length > 0, t, () => dispatch({ _tag: "Walk", delta: 1 })))
   ).child(
     m.help ? keysPanel(t, ui.mono) : div().flex_1().min_h(0).relative().child(
       v_flex().id(scroll).absolute().inset_0().overflow_y_scroll().p(14).gap(10).children(detailBody(m, rows, t, dispatch, ui, now))
@@ -830,7 +910,7 @@ function draw(m, rows, t, dispatch, ui, now) {
     (e) => e.child(topBar(m, t, dispatch, ui, wide)).when(
       error !== null,
       (x) => x.child(
-        div().px(12).py(6).flex_none().text_size(12).text_color(pick(t, "red", "ansi1")).child(error ?? "")
+        div().px(12).py(6).flex_none().text_size(12).text_color(pick2(t, "red", "ansi1")).child(error ?? "")
       )
     ).child(
       m.help ? keysPanel(t, ui.mono) : wide ? h_flex().flex_1().min_h(0).child(
@@ -916,6 +996,9 @@ var BeadsView = class extends View {
       this.search.focus();
     } else if (before.searching && !model.searching && msg._tag !== "SearchFocused") {
       this.nav.focus();
+    }
+    if (before.pane === "detail" && model.pane === "list") {
+      this.seen = null;
     }
     const at = this.rows(model).findIndex((b) => b.id === model.selected);
     if (at >= 0 && (this.seen === null || at < this.seen[0] || at >= this.seen[1])) {

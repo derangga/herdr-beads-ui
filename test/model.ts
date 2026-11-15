@@ -31,3 +31,6 @@ export function steps(m: Model, ...msgs: Msg[]): Model {
   }
   return m;
 }
+
+// n beads with distinct ids and spread priorities, for the list that must stay smooth.
+export const many = (n: number): Bead[] => Array.from({ length: n }, (_, i) => bead(`big-${i}`, { priority: i % 5, issue_type: ["task", "bug", "feature"][i % 3] ?? "task", updated_at: new Date(Date.UTC(2026, 0, 1) + i * 60_000).toISOString() }));

@@ -71,6 +71,11 @@ export type Sort = { key: SortKey; reverse: boolean };
 // status is "not closed", "all" or one status name; type is "all" or one type.
 export type Filters = { ready: boolean; status: string; type: string; search: string };
 
+// Which column holds the keyboard. Narrow shows only that column; wide shows both.
+export type Pane = "list" | "detail";
+
+export type Menu = "status" | "type" | "sort";
+
 export type Model = {
   // The last good load: a failed load leaves it alone.
   snapshot: Snapshot | null;
@@ -79,9 +84,36 @@ export type Model = {
   filters: Filters;
   sort: Sort;
   selected: string | null;
+  // The Viewer's own width in px, 0 until measured. Layout is derived from it, so crossing a breakpoint changes no state.
+  width: number;
+  pane: Pane;
+  // The search box has the keyboard, so a key types instead of being a command.
+  searching: boolean;
+  menu: Menu | null;
+  help: boolean;
 };
 
-export type Msg = { _tag: "Refresh" } | { _tag: "Loaded"; res: Res<Snapshot> } | { _tag: "ToggleReady" } | { _tag: "SetStatus"; status: string } | { _tag: "SetType"; type: string } | { _tag: "Search"; text: string } | { _tag: "SortBy"; key: SortKey } | { _tag: "Reverse" } | { _tag: "Select"; id: string };
+export type Msg =
+  | { _tag: "Refresh" }
+  | { _tag: "Loaded"; res: Res<Snapshot> }
+  | { _tag: "ToggleReady" }
+  | { _tag: "SetStatus"; status: string }
+  | { _tag: "SetType"; type: string }
+  | { _tag: "Search"; text: string }
+  | { _tag: "SortBy"; key: SortKey }
+  | { _tag: "Reverse" }
+  | { _tag: "Select"; id: string }
+  | { _tag: "Move"; delta: number }
+  | { _tag: "Click"; id: string }
+  | { _tag: "Enter" }
+  | { _tag: "Escape" }
+  | { _tag: "Tab" }
+  | { _tag: "BackToList" }
+  | { _tag: "Resized"; width: number }
+  | { _tag: "FocusSearch" }
+  | { _tag: "SearchFocused"; on: boolean }
+  | { _tag: "ToggleMenu"; menu: Menu }
+  | { _tag: "ToggleHelp" };
 
 // Plain data the runner executes and answers with a Msg.
 export type Cmd = { _tag: "Load" };

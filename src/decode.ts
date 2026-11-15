@@ -157,3 +157,17 @@ export function decodeFocus(v: unknown): Focus | null {
   const o = v as Obj;
   return { cwd: typeof o.cwd === "string" ? o.cwd : null, terminal: typeof o.terminal === "string" ? o.terminal : null };
 }
+
+// The one prop the viewer reads: the folder it was opened for.
+export function decodeProps(v: unknown): { root: string | null } {
+  const root = typeof v === "object" && v !== null ? (v as Obj).root : undefined;
+  return { root: typeof root === "string" && root !== "" ? root : null };
+}
+
+export const FALLBACK_MONO = "Menlo";
+
+// The terminal's font, for ids; a settings value that is not a name is the fallback.
+export function decodeFont(v: unknown): string {
+  const family = typeof v === "object" && v !== null ? (v as Obj).font_family : undefined;
+  return typeof family === "string" && family !== "" ? family : FALLBACK_MONO;
+}

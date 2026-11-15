@@ -33,6 +33,8 @@ export function fakeHost(exec: (call: Call, n: number) => Reply): { host: Host; 
     agents: () => [],
     spaces: () => [],
     props: () => ({}),
+    settings: () => ({}),
+    nextCommand: () => new Promise<string>(() => {}),
     theme: () => ({}),
     readClipboard: () => undefined,
     writeClipboard: () => {},

@@ -1,5 +1,5 @@
 // The only module that imports "herdr". Everything else gets a Host, so tests swap in a FakeHost.
-import { agents, exec, focused, panes, props, run, spaces, theme } from "herdr";
+import { agents, exec, focused, nextCommand, panes, props, run, settings, spaces, theme } from "herdr";
 import type { AsyncContext } from "gpui-kit";
 
 export type ExecResult = { code: number; stdout: string; stderr: string };
@@ -16,6 +16,9 @@ export interface Host {
   agents(): unknown;
   spaces(): unknown;
   props(): unknown;
+  settings(): unknown;
+  // Waits for the next key command sent to this mod ("focus" when pane.go lands on it).
+  nextCommand(): Promise<string>;
   theme(): Record<string, `#${string}`>;
   readClipboard(): string | undefined;
   writeClipboard(text: string): void;
@@ -30,6 +33,8 @@ export const realHost = (cx: AsyncContext): Host => ({
   agents: () => agents(),
   spaces: () => spaces(),
   props: () => props(),
+  settings: () => settings(),
+  nextCommand: () => nextCommand(),
   // The setters want `#${string}` and theme() says string: the one cast.
   theme: () => theme() as Record<string, `#${string}`>,
   readClipboard: () => cx.read_from_clipboard(),

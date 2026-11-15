@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeBlocked, decodeComments, decodeFocus, decodeList, decodeReady, decodeShow, decodeStatuses, decodeTree } from "../src/decode.ts";
+import { decodeBlocked, decodeComments, decodeFocus, decodeFont, decodeList, decodeProps, decodeReady, decodeShow, decodeStatuses, decodeTree } from "../src/decode.ts";
 import type { Res } from "../src/types.ts";
 import { fixture } from "./fake-host.ts";
 
@@ -181,4 +181,18 @@ test("focus: cwd and terminal, null when absent or of another type", () => {
   assert.deepEqual(decodeFocus({ cwd: 3 }), { cwd: null, terminal: null });
   assert.equal(decodeFocus(null), null);
   assert.equal(decodeFocus("x"), null);
+});
+
+test("props: root is a non-empty string or null", () => {
+  assert.deepEqual(decodeProps({ root: "/work/repo" }), { root: "/work/repo" });
+  for (const bad of [null, undefined, "x", {}, { root: "" }, { root: 3 }]) {
+    assert.deepEqual(decodeProps(bad), { root: null });
+  }
+});
+
+test("font: the settings family, else Menlo", () => {
+  assert.equal(decodeFont({ font_family: "JetBrains Mono" }), "JetBrains Mono");
+  for (const bad of [null, {}, { font_family: "" }, { font_family: 1 }]) {
+    assert.equal(decodeFont(bad), "Menlo");
+  }
 });

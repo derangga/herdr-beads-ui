@@ -9,5 +9,7 @@ dest="${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/beads"
 bash scripts/build-dist.sh
 mkdir -p "$dest"
 cp dist/mod.json "$dest/"
+rm -rf "$dest/icons"
+cp -R dist/icons "$dest/icons"
 cp dist/main.js "$dest/main.js"
 herdr-app check "$dest"

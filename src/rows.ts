@@ -1,5 +1,5 @@
 // Filtering, search and sorting of the loaded beads. Pure: bd is never run here.
-import type { Bead, Filters, Model, Sort, SortKey } from "./types.ts";
+import type { Bead, Filters, Model, Msg, Sort, SortKey } from "./types.ts";
 
 export const NOT_CLOSED = "not closed";
 export const ALL = "all";
@@ -55,4 +55,83 @@ export function visible(m: Model): Bead[] {
 export function reselect(m: Model): Model {
   const rows = visible(m);
   return rows.some((b) => b.id === m.selected) ? m : { ...m, selected: rows[0]?.id ?? null };
+}
+
+// --- layout ---
+
+export const WIDE_AT = 800;
+export const NO_AGE_BELOW = 480;
+export const ROW_H = 28;
+
+export const isWide = (m: Pick<Model, "width">): boolean => m.width >= WIDE_AT;
+export const listWidth = (width: number): number => Math.max(360, Math.round(width * 0.42));
+
+export const SORT_KEYS: SortKey[] = ["priority", "created", "updated", "closed", "status", "id", "title", "type", "assignee"];
+
+const BUILT_IN_STATUSES = ["open", "in_progress", "blocked", "deferred", "closed"];
+
+// The filter's fixed choices, then any status or type the loaded beads use that bd's built-ins do not name.
+export function statusOptions(m: Model): string[] {
+  const custom = new Set((m.snapshot?.beads ?? []).map((b) => b.status).filter((s) => !BUILT_IN_STATUSES.includes(s)));
+  return [NOT_CLOSED, ALL, ...BUILT_IN_STATUSES, ...[...custom].sort()];
+}
+
+export function typeOptions(m: Model): string[] {
+  return [ALL, ...[...new Set((m.snapshot?.beads ?? []).map((b) => b.issue_type))].sort()];
+}
+
+// "2d", "4w": the largest whole unit since `iso`. A date that does not parse or lies ahead reads as "now".
+const UNITS: [string, number][] = [
+  ["y", 365 * 86_400_000],
+  ["w", 7 * 86_400_000],
+  ["d", 86_400_000],
+  ["h", 3_600_000],
+  ["m", 60_000],
+];
+export function age(iso: string, now: number): string {
+  const ms = now - Date.parse(iso);
+  const unit = UNITS.find(([, size]) => ms >= size);
+  return unit === undefined ? "now" : `${Math.floor(ms / unit[1])}${unit[0]}`;
+}
+
+// The widest id on screen, in characters, capped so one long id does not squeeze every title.
+export const idChars = (rows: Bead[]): number =>
+  Math.min(
+    rows.reduce((n, b) => Math.max(n, b.id.length), 0),
+    20,
+  );
+
+// --- keys ---
+
+// A key while the Viewer has focus. In the search box a key types, so only Esc is a command (Enter reaches the model as the box's own submit).
+export function keyFor(m: Model, keystroke: string): Msg | null {
+  if (keystroke === "escape") {
+    return { _tag: "Escape" };
+  }
+  // A chord is never typed text, so refresh works in the box too.
+  if (m.searching || m.menu !== null) {
+    return keystroke === "ctrl-r" ? { _tag: "Refresh" } : null;
+  }
+  switch (keystroke) {
+    case "j":
+    case "down":
+      return { _tag: "Move", delta: 1 };
+    case "k":
+    case "up":
+      return { _tag: "Move", delta: -1 };
+    case "enter":
+      return { _tag: "Enter" };
+    case "tab":
+      return { _tag: "Tab" };
+    case "/":
+      return { _tag: "FocusSearch" };
+    case "ctrl-r":
+      return { _tag: "Refresh" };
+    case "?":
+    case "shift-/":
+    case "shift-?":
+      return { _tag: "ToggleHelp" };
+    default:
+      return null;
+  }
 }

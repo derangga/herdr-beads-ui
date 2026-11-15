@@ -60,3 +60,28 @@ export type StatusInfo = { name: string; icon: string; category: string };
 export type Direction = "down" | "up";
 
 export type Focus = { cwd: string | null; terminal: string | null };
+
+// What one load builds: every bead, the ids `bd ready` named, and id -> blocked_by_count from `bd blocked`.
+export type Snapshot = { beads: Bead[]; ready: Set<string>; locks: Map<string, number> };
+
+export type SortKey = "priority" | "created" | "updated" | "closed" | "status" | "id" | "title" | "type" | "assignee";
+
+export type Sort = { key: SortKey; reverse: boolean };
+
+// status is "not closed", "all" or one status name; type is "all" or one type.
+export type Filters = { ready: boolean; status: string; type: string; search: string };
+
+export type Model = {
+  // The last good load: a failed load leaves it alone.
+  snapshot: Snapshot | null;
+  loading: boolean;
+  error: BdError | null;
+  filters: Filters;
+  sort: Sort;
+  selected: string | null;
+};
+
+export type Msg = { _tag: "Refresh" } | { _tag: "Loaded"; res: Res<Snapshot> } | { _tag: "ToggleReady" } | { _tag: "SetStatus"; status: string } | { _tag: "SetType"; type: string } | { _tag: "Search"; text: string } | { _tag: "SortBy"; key: SortKey } | { _tag: "Reverse" } | { _tag: "Select"; id: string };
+
+// Plain data the runner executes and answers with a Msg.
+export type Cmd = { _tag: "Load" };

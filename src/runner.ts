@@ -1,7 +1,7 @@
 // Runs bd in the Viewed repo and returns a value: the decoded data or a tagged BdError. Nothing here throws.
 import { decodeBlocked, decodeComments, decodeList, decodeReady, decodeShow, decodeStatuses, decodeTree } from "./decode.ts";
 import type { ExecResult, Host } from "./host.ts";
-import type { BdError, Direction, Res } from "./types.ts";
+import type { BdError, Cmd, Direction, Msg, Res } from "./types.ts";
 
 const BD_TIMEOUT_MS = 15_000;
 // Another bd process can hold the database for a moment, so a locked or slow call is tried twice more.
@@ -103,3 +103,23 @@ export const showBead = (host: Host, root: string, id: string) => bdJson(host, r
 export const depTree = (host: Host, root: string, id: string, direction: Direction) => bdJson(host, root, ["dep", "tree", id, `--direction=${direction}`, "--json"], decodeTree);
 export const beadComments = (host: Host, root: string, id: string) => bdJson(host, root, ["comments", id, "--json"], decodeComments);
 export const statuses = (host: Host, root: string) => bdJson(host, root, ["statuses", "--json"], decodeStatuses);
+
+// Runs a Cmd and answers with a Msg. The three reads go at once; the first error in list, ready, blocked order wins.
+export async function run(host: Host, root: string, cmd: Cmd): Promise<Msg> {
+  switch (cmd._tag) {
+    case "Load": {
+      const [beads, ready, blocked] = await Promise.all([listBeads(host, root), readyIds(host, root), blockedBeads(host, root)]);
+      if (!beads.ok) {
+        return { _tag: "Loaded", res: beads };
+      }
+      if (!ready.ok) {
+        return { _tag: "Loaded", res: ready };
+      }
+      if (!blocked.ok) {
+        return { _tag: "Loaded", res: blocked };
+      }
+      const locks = new Map(blocked.value.map((b) => [b.id, b.blocked_by_count]));
+      return { _tag: "Loaded", res: { ok: true, value: { beads: beads.value, ready: new Set(ready.value), locks } } };
+    }
+  }
+}

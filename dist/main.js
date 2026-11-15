@@ -126,7 +126,11 @@ var decodeComments = decoder(
     return { id: str(o, "id", p), author: str(o, "author", p), text: str(o, "text", p), created_at: str(o, "created_at", p) };
   })
 );
-var decodeStatuses = decoder((json) => each(top(json), "built_in_statuses", "$", (o, p) => ({ name: str(o, "name", p), icon: str(o, "icon", p), category: str(o, "category", p) })));
+var status = (icon2) => (o, p) => ({ name: str(o, "name", p), icon: icon2(o, "icon", p), category: str(o, "category", p) });
+var decodeStatuses = decoder((json) => {
+  const o = top(json);
+  return [...each(o, "built_in_statuses", "$", status(str)), ...o.custom_statuses == null ? [] : each(o, "custom_statuses", "$", status(strOr))];
+});
 function decodeFocus(v) {
   if (typeof v !== "object" || v === null) {
     return null;
@@ -169,8 +173,8 @@ var ALL = "all";
 var initFilters = () => ({ ready: false, status: NOT_CLOSED, type: ALL, search: "" });
 var initSort = () => ({ key: "priority", reverse: false });
 var STATUS_ORDER = ["open", "in_progress", "blocked", "deferred", "closed"];
-var rank = (status) => {
-  const i = STATUS_ORDER.indexOf(status);
+var rank = (status2) => {
+  const i = STATUS_ORDER.indexOf(status2);
   return i < 0 ? STATUS_ORDER.length : i;
 };
 var text = (a, b) => a.localeCompare(b, void 0, { numeric: true, sensitivity: "base" });
@@ -253,6 +257,14 @@ function statusOptions(m) {
   const custom = new Set((m.snapshot?.beads ?? []).map((b) => b.status).filter((s) => !BUILT_IN_STATUSES.includes(s)));
   return [NOT_CLOSED, ALL, ...BUILT_IN_STATUSES, ...[...custom].sort()];
 }
+function shownBead(m) {
+  const id = shownId(m);
+  const p = id === null ? void 0 : m.details.get(id)?.show;
+  const d = p?._tag === "Ready" ? p.value : p?._tag === "Loading" ? p.prev : null;
+  const status2 = m.snapshot?.beads.find((b) => b.id === id)?.status;
+  return d === null || status2 === void 0 ? d : { ...d, status: status2 };
+}
+var pickOptions = (m, current) => m.statuses.includes(current) ? m.statuses : [...m.statuses, current];
 function typeOptions(m) {
   return [ALL, ...[...new Set((m.snapshot?.beads ?? []).map((b) => b.issue_type))].sort()];
 }
@@ -299,6 +311,8 @@ function keyFor(m, keystroke) {
       return { _tag: "FocusSearch" };
     case "ctrl-r":
       return { _tag: "Refresh" };
+    case "s":
+      return { _tag: "ToggleMenu", menu: "pick" };
     case "[":
       return { _tag: "Walk", delta: -1 };
     case "]":
@@ -393,6 +407,21 @@ var blockedBeads = (host, root) => bdJson(host, root, ["blocked", "--json"], dec
 var showBead = (host, root, id) => bdJson(host, root, ["show", id, "--json"], decodeShow);
 var depTree = (host, root, id, direction) => bdJson(host, root, ["dep", "tree", id, `--direction=${direction}`, "--json"], decodeTree);
 var beadComments = (host, root, id) => bdJson(host, root, ["comments", id, "--json"], decodeComments);
+var statuses = (host, root) => bdJson(host, root, ["statuses", "--json"], decodeStatuses);
+var updateStatus = (host, root, id, status2) => bd(host, root, ["update", id, "--status", status2]);
+var closeBead = (host, root, id, reason) => bd(host, root, ["close", id, ...reason === "" ? [] : ["--reason", reason]]);
+var reopenBead = (host, root, id) => bd(host, root, ["reopen", id]);
+async function write(host, root, { id, from, to, reason }) {
+  const done = (res, second) => ({ _tag: "Written", id, to, error: res.ok ? null : res.error, second });
+  if (to === "closed") {
+    return done(await closeBead(host, root, id, reason), false);
+  }
+  if (from !== "closed") {
+    return done(await updateStatus(host, root, id, to), false);
+  }
+  const reopened = await reopenBead(host, root, id);
+  return !reopened.ok || to === "open" ? done(reopened, false) : done(await updateStatus(host, root, id, to), true);
+}
 async function run2(host, root, cmd) {
   switch (cmd._tag) {
     case "Load": {
@@ -422,14 +451,39 @@ async function run2(host, root, cmd) {
     case "Wait":
       await host.sleep(WAIT_MS[cmd.timer]);
       return { _tag: "Waited", id: cmd.id, gen: cmd.gen, timer: cmd.timer };
+    case "Statuses":
+      return { _tag: "StatusesRead", res: await statuses(host, root) };
+    case "Write":
+      return write(host, root, cmd);
   }
 }
 
 // src/update.ts
-var initModel = () => ({ snapshot: null, loading: false, error: null, filters: initFilters(), sort: initSort(), selected: null, shown: null, back: [], forward: [], details: /* @__PURE__ */ new Map(), gen: 0, width: 0, pane: "list", searching: false, menu: null, help: false });
+var initModel = () => ({
+  snapshot: null,
+  loading: false,
+  error: null,
+  filters: initFilters(),
+  sort: initSort(),
+  selected: null,
+  shown: null,
+  back: [],
+  forward: [],
+  details: /* @__PURE__ */ new Map(),
+  gen: 0,
+  width: 0,
+  pane: "list",
+  searching: false,
+  menu: null,
+  help: false,
+  statuses: BUILT_IN_STATUSES,
+  writing: /* @__PURE__ */ new Map(),
+  writeError: null,
+  reload: false
+});
 function update(m, msg) {
   const [next, cmds] = step(m, msg);
-  const [settled, more] = settle(next);
+  const [settled, more] = settle(next.writeError !== null && next.writeError.id !== shownId(next) ? { ...next, writeError: null } : next);
   return [settled, more.length === 0 ? cmds : [...cmds, ...more]];
 }
 var PARTS = ["show", "down", "up", "comments"];
@@ -474,10 +528,14 @@ function step(m, msg) {
     case "Refresh":
       return m.loading ? [m, []] : [{ ...m, loading: true }, [{ _tag: "Load" }]];
     case "Loaded": {
-      if (!msg.res.ok) {
-        return [{ ...m, loading: false, error: msg.res.error }, []];
+      if (m.reload) {
+        return [{ ...m, reload: false }, [{ _tag: "Load" }]];
       }
-      const next = reselect({ ...m, loading: false, error: null, snapshot: msg.res.value });
+      const writing = new Map([...m.writing].filter(([, s]) => s === "running"));
+      if (!msg.res.ok) {
+        return [{ ...m, loading: false, error: msg.res.error, writing }, []];
+      }
+      const next = reselect({ ...m, loading: false, error: null, snapshot: msg.res.value, writing });
       const id = shownId(next);
       if (id === null) {
         return [{ ...next, details: /* @__PURE__ */ new Map() }, []];
@@ -533,8 +591,16 @@ function step(m, msg) {
       return [{ ...m, searching: true, menu: null, help: false, pane: "list" }, []];
     case "SearchFocused":
       return [msg.on === m.searching ? m : { ...m, searching: msg.on }, []];
-    case "ToggleMenu":
+    case "ToggleMenu": {
+      if (msg.menu === "pick") {
+        const b = shownBead(m);
+        if (b === null || m.help || m.writing.has(b.id)) {
+          return [m, []];
+        }
+        return [{ ...m, menu: m.menu === "pick" || m.menu === "reason" ? null : "pick", writeError: null }, []];
+      }
       return [{ ...m, menu: m.menu === msg.menu ? null : msg.menu }, []];
+    }
     case "ToggleHelp":
       return [{ ...m, help: !m.help, menu: null }, []];
     case "Shown":
@@ -548,6 +614,31 @@ function step(m, msg) {
         return [patch(m, msg.id, "show", msg.gen, { slow: true }), []];
       }
       return [m, waiting(m, msg.id, "show", msg.gen) === void 0 ? [] : PARTS.map((part) => fetch(msg.id, part, msg.gen))];
+    case "ReadStatuses":
+      return [m, [{ _tag: "Statuses" }]];
+    case "StatusesRead":
+      return [msg.res.ok && msg.res.value.length > 0 ? { ...m, statuses: msg.res.value.map((s) => s.name) } : m, []];
+    case "Pick": {
+      const b = shownBead(m);
+      if (b === null || m.writing.has(b.id) || msg.status === b.status) {
+        return [{ ...m, menu: null }, []];
+      }
+      return msg.status === "closed" ? [{ ...m, menu: "reason" }, []] : write2(m, b.id, b.status, msg.status, "");
+    }
+    case "CloseWith": {
+      const b = shownBead(m);
+      return b === null || m.writing.has(b.id) || b.status === "closed" ? [{ ...m, menu: null }, []] : write2(m, b.id, b.status, "closed", msg.reason.trim());
+    }
+    case "Written": {
+      const writing = new Map(m.writing);
+      if (msg.error !== null && !msg.second) {
+        writing.delete(msg.id);
+        return [{ ...m, writing, writeError: { id: msg.id, error: msg.error, second: null } }, []];
+      }
+      writing.set(msg.id, "reloading");
+      const writeError = msg.error === null ? m.writeError : { id: msg.id, error: msg.error, second: msg.to };
+      return m.loading ? [{ ...m, writing, writeError, reload: true }, []] : step({ ...m, writing, writeError }, { _tag: "Refresh" });
+    }
     case "Retry": {
       const id = shownId(m);
       const d = id === null ? void 0 : m.details.get(id);
@@ -560,6 +651,9 @@ function step(m, msg) {
       return [{ ...m, gen, details: new Map(m.details).set(id, again) }, msg.part === "show" ? [fetch(id, "show", gen), wait(id, gen, "loading")] : [fetch(id, msg.part, gen)]];
     }
   }
+}
+function write2(m, id, from, to, reason) {
+  return [{ ...m, menu: null, writeError: null, writing: new Map(m.writing).set(id, "running") }, [{ _tag: "Write", id, from, to, reason }]];
 }
 function move(m, delta) {
   const rows = visible(m);
@@ -636,12 +730,12 @@ function priorityColor(p, t) {
   return p <= 0 ? pick2(t, "red", "ansi1") : p === 1 ? peach(t) : p === 2 ? pick2(t, "yellow", "ansi3") : p === 3 ? pick2(t, "blue", "ansi4") : t.muted;
 }
 var STATUS_COLOR = { open: ["green", "ansi2"], in_progress: ["blue", "ansi4"], blocked: ["red", "ansi1"] };
-var statusColor = (status, t) => {
-  const names = STATUS_COLOR[status];
+var statusColor = (status2, t) => {
+  const names = STATUS_COLOR[status2];
   return names === void 0 ? t.muted : pick2(t, ...names);
 };
 var STATUS_LABEL = { open: "OPEN", in_progress: "IN PROG", blocked: "BLOCKED", deferred: "DEFER", closed: "CLOSED" };
-var statusLabel = (status) => STATUS_LABEL[status] ?? status.toUpperCase().slice(0, 8);
+var statusLabel = (status2) => STATUS_LABEL[status2] ?? status2.toUpperCase().slice(0, 8);
 var TYPE_ICON = /* @__PURE__ */ new Set(["task", "bug", "feature", "epic", "chore"]);
 function button(id, label, on, t, click, chevron = false) {
   return h_flex().id(id).h(26).px(8).gap(4).flex_none().items_center().rounded(6).border_1().border_color(on ? t.accent : t.border).text_size(12).text_color(on ? t.foreground : t.muted).when(on, (e) => e.bg(t.selected)).cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
@@ -670,24 +764,17 @@ var SORT_LABEL = (key) => key.charAt(0).toUpperCase() + key.slice(1);
 function searchBox(ui) {
   return div().id("search").flex_1().min_w(120).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(Input.new(ui.search).h(26).w_full().text_size(12));
 }
+var panel = (t) => v_flex().min_w(140).py(4).rounded(8).border_1().border_color(t.border).bg(t.popover);
+var option = (id, label, on, t, click) => h_flex().id(id).h(26).px(10).gap(8).items_center().text_size(12).text_color(on ? t.accent : t.foreground).cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
+  cx.stop_propagation();
+  click();
+}).child(label);
 function picker(m, name, label, on, t, dispatch) {
   const options = name === "status" ? statusOptions(m).map((s) => ({ label: s, on: m.filters.status === s, msg: { _tag: "SetStatus", status: s } })) : name === "type" ? typeOptions(m).map((s) => ({ label: s, on: m.filters.type === s, msg: { _tag: "SetType", type: s } })) : SORT_KEYS.map((k) => ({ label: SORT_LABEL(k), on: m.sort.key === k, msg: { _tag: "SortBy", key: k } }));
   return Popup.new(
     `menu-${name}`,
     button(name, label, on || m.menu === name, t, () => dispatch({ _tag: "ToggleMenu", menu: name }), true)
-  ).anchor("bottom_left").flex_none().when(
-    m.menu === name,
-    (e) => e.content(
-      v_flex().min_w(140).py(4).rounded(8).border_1().border_color(t.border).bg(t.popover).children(
-        options.map(
-          (o) => h_flex().id(`option-${name}-${o.label}`).h(26).px(10).gap(8).items_center().text_size(12).text_color(o.on ? t.accent : t.foreground).cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
-            cx.stop_propagation();
-            dispatch(o.msg);
-          }).child(o.label)
-        )
-      )
-    )
-  );
+  ).anchor("bottom_left").flex_none().when(m.menu === name, (e) => e.content(panel(t).children(options.map((o) => option(`option-${name}-${o.label}`, o.label, o.on, t, () => dispatch(o.msg))))));
 }
 function filters(m, t, dispatch, narrow) {
   const f = m.filters;
@@ -716,7 +803,7 @@ function row(b, m, t, narrow, now, idW, mono) {
   const selected = b.id === (shownId(m) ?? m.selected);
   const dim = (c) => closed ? t.muted : c;
   const locks = m.snapshot?.locks.get(b.id) ?? 0;
-  const status = statusColor(b.status, t);
+  const status2 = statusColor(b.status, t);
   return h_flex().id(b.id).w_full().h(ROW_H).flex_none().pr(10).gap(6).items_center().text_size(12).cursor_pointer().text_color(closed ? t.muted : t.foreground).when(selected, (e) => e.bg(pick2(t, "surface0", "raised"))).hover((s) => s.bg(t.hover)).child(
     div().w(2).h_full().flex_none().when(selected, (e) => e.bg(t.accent))
   ).when(
@@ -726,7 +813,7 @@ function row(b, m, t, narrow, now, idW, mono) {
     )
   ).child(
     div().w(16).flex_none().text_size(11).font_semibold().text_color(dim(priorityColor(b.priority, t))).child(`P${b.priority}`)
-  ).child(narrow ? div().w(8).h(8).flex_none().rounded(4).bg(dim(status)) : div().w(56).flex_none().text_size(10).font_semibold().text_color(dim(status)).child(statusLabel(b.status))).child(
+  ).child(narrow ? div().w(8).h(8).flex_none().rounded(4).bg(dim(status2)) : div().w(56).flex_none().text_size(10).font_semibold().text_color(dim(status2)).child(statusLabel(b.status))).child(
     div().w(idW * 7).flex_none().truncate().font_family(mono).text_size(11).text_color(t.muted).child(b.id)
   ).child(div().flex_1().min_w(0).truncate().child(b.title)).when(
     locks > 0,
@@ -758,6 +845,7 @@ var KEYS = [
   ["Esc", "Back to the list (narrow), clear the search, close a menu"],
   ["Tab", "Switch focus between list and detail (wide)"],
   ["[ ]", "Back and forward in the history"],
+  ["s", "Change the status of the shown bead"],
   ["/", "Search"],
   ["Ctrl+R", "Refresh"],
   ["?", "Show or hide these keys"]
@@ -803,14 +891,35 @@ function tree(label, part, p, empty, t, dispatch, mono) {
   const rows = treeRows(nodes);
   return [section(`${label} (${rows.length})`, t, ...rows.length === 0 ? [div().text_size(12).text_color(t.muted).child(empty)] : rows.map((r, i) => treeRow(r, `${part}-${i}`, t, dispatch, mono)))];
 }
-function metaRow(b, t, ui, now) {
-  const status = statusColor(b.status, t);
+function statusPill(b, m, t, dispatch, ui) {
+  const color = statusColor(b.status, t);
+  const busy = m.writing.has(b.id);
+  const pill = h_flex().id("status-pill").gap(3).px(6).items_center().rounded(4).border_1().border_color(color).text_size(10).font_semibold().text_color(color).opacity(busy ? 0.6 : 1).when(busy, (e) => e.child(svg(icon("refresh")).size(10).flex_none().spin(900))).child(statusLabel(b.status)).when(
+    !busy,
+    (e) => e.child(svg(icon("chevron-down")).size(10).flex_none()).tooltip("Change status (s)").cursor_pointer().hover((s) => s.bg(t.hover)).active((s) => s.bg(t.selected)).on_click((_e, cx) => {
+      cx.stop_propagation();
+      dispatch({ _tag: "ToggleMenu", menu: "pick" });
+    })
+  );
+  return Popup.new("menu-pick", pill).anchor("bottom_left").flex_none().when(!busy && m.menu === "pick", (e) => e.content(panel(t).children(pickOptions(m, b.status).map((s) => option(`option-pick-${s}`, s, s === b.status, t, () => dispatch({ _tag: "Pick", status: s })))))).when(
+    !busy && m.menu === "reason",
+    (e) => e.content(
+      panel(t).w(240).p(8).gap(6).child(div().text_size(11).text_color(t.muted).child("Reason for closing (optional)")).child(
+        div().on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(Input.new(ui.reason).h(26).w_full().text_size(12))
+      ).child(
+        h_flex().gap(6).justify_end().child(button("close-cancel", "Cancel", false, t, () => dispatch({ _tag: "Escape" }))).child(button("close-confirm", "Close bead", true, t, () => dispatch({ _tag: "CloseWith", reason: ui.reason.value() })))
+      )
+    )
+  );
+}
+function metaRow(b, m, t, dispatch, ui, now) {
   const ago = age(b.created_at, now);
-  return h_flex().flex_wrap().gap_x(10).gap_y(4).items_center().text_size(12).child(div().font_family(ui.mono).text_size(12).text_color(t.muted).child(b.id)).child(div().px(6).rounded(4).border_1().border_color(status).text_size(10).font_semibold().text_color(status).child(statusLabel(b.status))).child(div().text_size(11).font_semibold().text_color(priorityColor(b.priority, t)).child(`P${b.priority}`)).when(b.assignee !== null, (e) => e.child(div().text_color(t.muted).child(`@${b.assignee}`))).child(
+  return h_flex().flex_wrap().gap_x(10).gap_y(4).items_center().text_size(12).child(div().font_family(ui.mono).text_size(12).text_color(t.muted).child(b.id)).child(statusPill(b, m, t, dispatch, ui)).child(div().text_size(11).font_semibold().text_color(priorityColor(b.priority, t)).child(`P${b.priority}`)).when(b.assignee !== null, (e) => e.child(div().text_color(t.muted).child(`@${b.assignee}`))).child(
     div().id("age").text_color(t.muted).tooltip(`Created ${fullDate(b.created_at)}`).child(ago === "now" ? ago : `${ago} ago`)
   );
 }
-function beadBody(d, e, hidden, t, dispatch, ui, now) {
+var writeText = (w) => w.second === null ? bdText(w.error) : `bd reopen worked, but bd update --status ${w.second} failed: ${bdText(w.error)}`;
+function beadBody(d, e, m, hidden, t, dispatch, ui, now) {
   const comments = e.comments._tag === "Ready" ? e.comments.value : e.comments._tag === "Loading" ? e.comments.prev ?? [] : [];
   const sorted = [...comments].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
   return [
@@ -818,7 +927,8 @@ function beadBody(d, e, hidden, t, dispatch, ui, now) {
       svg(icon(TYPE_ICON.has(d.issue_type) ? d.issue_type : "task")).size(18).flex_none().text_color(t.dim)
     ).child(div().flex_1().min_w(0).max_h(40).overflow_hidden().text_size(16).line_height(1.25).font_semibold().child(d.title)),
     ...hidden ? [div().flex_none().text_size(12).text_color(t.muted).child("Hidden by the current filters")] : [],
-    metaRow(d, t, ui, now),
+    metaRow(d, m, t, dispatch, ui, now),
+    ...m.writeError?.id === d.id ? [div().flex_none().text_size(12).text_color(red(t)).child(writeText(m.writeError))] : [],
     ...d.labels.length === 0 ? [] : [
       h_flex().flex_wrap().gap(4).flex_none().children(
         d.labels.map(
@@ -863,11 +973,11 @@ function detailBody(m, rows, t, dispatch, ui, now) {
       h_flex().flex_none().child(button("retry-show", "Retry", false, t, () => dispatch({ _tag: "Retry", part: "show" })))
     ];
   }
-  const bead2 = show._tag === "Ready" ? show.value : show.prev;
+  const bead2 = shownBead(m);
   if (bead2 === null) {
     return entry.slow ? [note("Loading")] : [];
   }
-  return beadBody(bead2, entry, hiddenByFilters(m, rows), t, dispatch, ui, now);
+  return beadBody(bead2, entry, m, hiddenByFilters(m, rows), t, dispatch, ui, now);
 }
 function detailPane(m, rows, t, dispatch, ui, narrow, now) {
   const scroll = `detail-${shownId(m) ?? "none"}`;
@@ -940,6 +1050,7 @@ var BeadsView = class extends View {
   cx;
   nav;
   search;
+  reason;
   scroll;
   rows = rowsCache();
   // The rows the list drew last, [start, end): what is on screen, which the model does not know.
@@ -966,9 +1077,12 @@ var BeadsView = class extends View {
     this.search.on("submit", () => this.dispatch({ _tag: "Enter" }));
     this.search.on("focus", () => this.dispatch({ _tag: "SearchFocused", on: true }));
     this.search.on("blur", () => this.dispatch({ _tag: "SearchFocused", on: false }));
+    this.reason = InputState.new({ placeholder: "Reason" });
+    this.reason.on("submit", () => this.dispatch({ _tag: "CloseWith", reason: this.reason.value() }));
     cx.spawn(() => this.listen());
     if (this.root !== null) {
       this.dispatch({ _tag: "Refresh" });
+      this.dispatch({ _tag: "ReadStatuses" });
     }
   }
   // pane.go gives a shown copy the keyboard by sending "focus".
@@ -997,6 +1111,12 @@ var BeadsView = class extends View {
     } else if (before.searching && !model.searching && msg._tag !== "SearchFocused") {
       this.nav.focus();
     }
+    if (model.menu === "reason" && before.menu !== "reason") {
+      this.reason.set_value("");
+      this.reason.focus();
+    } else if ((before.menu === "pick" || before.menu === "reason") && model.menu === null) {
+      this.nav.focus();
+    }
     if (before.pane === "detail" && model.pane === "list") {
       this.seen = null;
     }
@@ -1010,13 +1130,14 @@ var BeadsView = class extends View {
     if (this.root === null) {
       return div2().size_full().p(14).bg(t.background).text_color(t.muted).child("Open from a terminal");
     }
-    const ui = { nav: this.nav, search: this.search, scroll: this.scroll, mono: this.mono, seen: (start, end) => this.seen = [start, end] };
+    const ui = { nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start, end) => this.seen = [start, end] };
     return draw(this.store.model, this.rows(this.store.model), t, (msg) => this.dispatch(msg), ui, Date.now());
   }
   // Bounded: set the flag and let the replies in flight be dropped.
   close(_cx) {
     this.store.close();
     this.search.release();
+    this.reason.release();
     this.scroll.release();
   }
 };

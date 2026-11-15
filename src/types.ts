@@ -78,7 +78,8 @@ export type Filters = { ready: boolean; status: string; type: string; search: st
 // Which column holds the keyboard. Narrow shows only that column; wide shows both.
 export type Pane = "list" | "detail";
 
-export type Menu = "status" | "type" | "sort";
+// "pick" is the status picker of the shown bead, "reason" its second step: the optional reason for closing.
+export type Menu = "status" | "type" | "sort" | "pick" | "reason";
 
 // One bd call of the detail. `gen` names the request: a reply or timer from an earlier request of the same part carries
 // another number and is dropped. A reload keeps the old value in `prev` so the shown detail does not blank while it runs.
@@ -114,6 +115,15 @@ export type Model = {
   searching: boolean;
   menu: Menu | null;
   help: boolean;
+  // The names the status picker lists: bd's, or the built-in five until bd answers or when it cannot.
+  statuses: string[];
+  // Beads with a status write in flight. "running" is bd running; "reloading" is the write done and the list loading again, so the
+  // pill keeps its spinner instead of showing the old status for a moment. A bead in here cannot be written again.
+  writing: Map<string, "running" | "reloading">;
+  // The last failed write, shown under the meta row of its bead. `second` is the status of a bd update that failed after bd reopen worked.
+  writeError: { id: string; error: BdError; second: string | null } | null;
+  // A write finished while a load was running, so that load may predate it: its answer is dropped and one more load runs.
+  reload: boolean;
 };
 
 export type Msg =
@@ -146,10 +156,24 @@ export type Msg =
   | { _tag: "Discussed"; id: string; gen: number; res: Res<Comment[]> }
   | { _tag: "Waited"; id: string; gen: number; timer: Timer }
   // Reruns one failed call of the shown bead.
-  | { _tag: "Retry"; part: PartName };
+  | { _tag: "Retry"; part: PartName }
+  | { _tag: "ReadStatuses" }
+  | { _tag: "StatusesRead"; res: Res<StatusInfo[]> }
+  // A status chosen in the picker for the shown bead; "closed" asks for a reason first.
+  | { _tag: "Pick"; status: string }
+  // The reason step's answer: closes the shown bead.
+  | { _tag: "CloseWith"; reason: string }
+  // `error` is null on success. `second`: the failure is of the bd update after bd reopen worked, so the bead is open now.
+  | { _tag: "Written"; id: string; to: string; error: BdError | null; second: boolean };
 
 // "fetch": the bead has stayed shown long enough to ask bd. "loading": long enough for a "Loading" line.
 export type Timer = "fetch" | "loading";
 
 // Plain data the runner executes and answers with a Msg.
-export type Cmd = { _tag: "Load" } | { _tag: "Fetch"; id: string; part: PartName; gen: number } | { _tag: "Wait"; id: string; gen: number; timer: Timer };
+export type Cmd =
+  | { _tag: "Load" }
+  | { _tag: "Fetch"; id: string; part: PartName; gen: number }
+  | { _tag: "Wait"; id: string; gen: number; timer: Timer }
+  | { _tag: "Statuses" }
+  // Moves a bead from one status to another: the runner picks the bd commands.
+  | { _tag: "Write"; id: string; from: string; to: string; reason: string };

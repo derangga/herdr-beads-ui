@@ -34,6 +34,7 @@ export default class BeadsView extends View {
   cx!: AsyncContext;
   nav!: FocusHandle;
   search!: InputState;
+  reason!: InputState;
   scroll!: VirtualListScrollHandle;
   rows = rowsCache();
   // The rows the list drew last, [start, end): what is on screen, which the model does not know.
@@ -62,9 +63,14 @@ export default class BeadsView extends View {
     this.search.on("submit", () => this.dispatch({ _tag: "Enter" }));
     this.search.on("focus", () => this.dispatch({ _tag: "SearchFocused", on: true }));
     this.search.on("blur", () => this.dispatch({ _tag: "SearchFocused", on: false }));
+    // Enter in the reason box closes the bead; Esc reaches the Viewer's key handler and cancels.
+    this.reason = InputState.new({ placeholder: "Reason" });
+    this.reason.on("submit", () => this.dispatch({ _tag: "CloseWith", reason: this.reason.value() }));
     cx.spawn(() => this.listen());
     if (this.root !== null) {
       this.dispatch({ _tag: "Refresh" });
+      // Read with the first load, so the picker has bd's list by the time anyone opens it.
+      this.dispatch({ _tag: "ReadStatuses" });
     }
   }
 
@@ -97,6 +103,12 @@ export default class BeadsView extends View {
       // Enter or Esc in the box gives the keyboard back to the Viewer.
       this.nav.focus();
     }
+    if (model.menu === "reason" && before.menu !== "reason") {
+      this.reason.set_value("");
+      this.reason.focus();
+    } else if ((before.menu === "pick" || before.menu === "reason") && model.menu === null) {
+      this.nav.focus();
+    }
     // The list was not drawn while the detail filled the Viewer, so what `seen` says is old when it comes back.
     if (before.pane === "detail" && model.pane === "list") {
       this.seen = null;
@@ -114,7 +126,7 @@ export default class BeadsView extends View {
     if (this.root === null) {
       return div().size_full().p(14).bg(t.background).text_color(t.muted).child("Open from a terminal");
     }
-    const ui = { nav: this.nav, search: this.search, scroll: this.scroll, mono: this.mono, seen: (start: number, end: number) => (this.seen = [start, end]) };
+    const ui = { nav: this.nav, search: this.search, reason: this.reason, scroll: this.scroll, mono: this.mono, seen: (start: number, end: number) => (this.seen = [start, end]) };
     return draw(this.store.model, this.rows(this.store.model), t, (msg) => this.dispatch(msg), ui, Date.now());
   }
 
@@ -122,6 +134,7 @@ export default class BeadsView extends View {
   close(_cx: AsyncContext): void {
     this.store.close();
     this.search.release();
+    this.reason.release();
     this.scroll.release();
   }
 }

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bd, beadComments, blockedBeads, depTree, listBeads, readyIds, showBead, statuses } from "../src/runner.ts";
+import { bd, beadComments, blockedBeads, closeBead, depTree, listBeads, readyIds, reopenBead, run, showBead, statuses, updateStatus } from "../src/runner.ts";
 import type { Res } from "../src/types.ts";
 import { exit, fakeHost, fixture, ok } from "./fake-host.ts";
 import type { Reply } from "./fake-host.ts";
@@ -146,4 +146,68 @@ test("Undecodable is not retried, and its version is null when bd cannot say", a
   const res = await listBeads(host, ROOT);
   assert.ok(!res.ok && res.error._tag === "Undecodable" && res.error.version === null);
   assert.deepEqual(sleeps, []);
+});
+
+test("the status writes build bd's argv in the Viewed repo", async () => {
+  const { host, calls } = fakeHost(() => ok(""));
+  await updateStatus(host, ROOT, "x-1", "in_progress");
+  await closeBead(host, ROOT, "x-1", "");
+  await closeBead(host, ROOT, "x-1", "done in review");
+  await reopenBead(host, ROOT, "x-1");
+  assert.deepEqual(
+    calls.map((c) => [c.args.join("|"), c.cwd]),
+    [
+      ["update|x-1|--status|in_progress", ROOT],
+      ["close|x-1", ROOT],
+      ["close|x-1|--reason|done in review", ROOT],
+      ["reopen|x-1", ROOT],
+    ],
+  );
+});
+
+// What a Write command runs, and what it answers.
+async function written(from: string, to: string, reason = "", fail: (args: string[]) => boolean = () => false) {
+  const { host, calls } = fakeHost(({ args }) => (fail(args) ? exit("Error: no") : ok("")));
+  const msg = await run(host, ROOT, { _tag: "Write", id: "x-1", from, to, reason });
+  return { msg, argv: calls.map((c) => c.args.join(" ")) };
+}
+
+test("Write: open to in_progress is one bd update", async () => {
+  const { msg, argv } = await written("open", "in_progress");
+  assert.deepEqual(argv, ["update x-1 --status in_progress"]);
+  assert.deepEqual(msg, { _tag: "Written", id: "x-1", to: "in_progress", error: null, second: false });
+});
+
+test("Write: closing is bd close, with the reason only when there is one", async () => {
+  assert.deepEqual((await written("open", "closed")).argv, ["close x-1"]);
+  assert.deepEqual((await written("blocked", "closed", "shipped")).argv, ["close x-1 --reason shipped"]);
+});
+
+test("Write: closed to open is bd reopen alone; closed to anything else reopens, then updates", async () => {
+  assert.deepEqual((await written("closed", "open")).argv, ["reopen x-1"]);
+  const { msg, argv } = await written("closed", "in_progress");
+  assert.deepEqual(argv, ["reopen x-1", "update x-1 --status in_progress"]);
+  assert.deepEqual(msg, { _tag: "Written", id: "x-1", to: "in_progress", error: null, second: true });
+});
+
+test("Write: a failing bd answers with its error, and a failed reopen stops there", async () => {
+  const first = await written("open", "deferred", "", () => true);
+  assert.deepEqual(first.msg, { _tag: "Written", id: "x-1", to: "deferred", error: { _tag: "BdRejected", code: 1, text: "Error: no" }, second: false });
+  const reopen = await written("closed", "in_progress", "", () => true);
+  assert.deepEqual(reopen.argv, ["reopen x-1"]);
+  assert.ok(reopen.msg._tag === "Written" && reopen.msg.error !== null && !reopen.msg.second);
+});
+
+test("Write: reopen worked and update failed is the second step's error", async () => {
+  const { msg, argv } = await written("closed", "blocked", "", (args) => args[0] === "update");
+  assert.deepEqual(argv, ["reopen x-1", "update x-1 --status blocked"]);
+  assert.deepEqual(msg, { _tag: "Written", id: "x-1", to: "blocked", error: { _tag: "BdRejected", code: 1, text: "Error: no" }, second: true });
+});
+
+test("Statuses lists bd's statuses, built-in and custom", async () => {
+  const body = JSON.stringify({ built_in_statuses: [{ name: "open", icon: "o", category: "active" }], custom_statuses: [{ name: "review", category: "unspecified" }] });
+  const { host, calls } = fakeHost(() => ok(body));
+  const msg = await run(host, ROOT, { _tag: "Statuses" });
+  assert.deepEqual(calls[0]?.args, ["statuses", "--json"]);
+  assert.ok(msg._tag === "StatusesRead" && msg.res.ok && msg.res.value.map((s) => s.name).join() === "open,review");
 });

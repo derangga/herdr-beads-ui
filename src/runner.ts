@@ -107,6 +107,25 @@ export const depTree = (host: Host, root: string, id: string, direction: Directi
 export const beadComments = (host: Host, root: string, id: string) => bdJson(host, root, ["comments", id, "--json"], decodeComments);
 export const statuses = (host: Host, root: string) => bdJson(host, root, ["statuses", "--json"], decodeStatuses);
 
+// A status write is the same call again when it is retried, so the runner's lock retry covers these too.
+export const updateStatus = (host: Host, root: string, id: string, status: string) => bd(host, root, ["update", id, "--status", status]);
+export const closeBead = (host: Host, root: string, id: string, reason: string) => bd(host, root, ["close", id, ...(reason === "" ? [] : ["--reason", reason])]);
+export const reopenBead = (host: Host, root: string, id: string) => bd(host, root, ["reopen", id]);
+
+// bd close and bd reopen own the closed state, so leaving or entering closed is theirs and every other move is bd update. Leaving
+// closed for something but open takes two calls, and `second` tells which one an error is of.
+async function write(host: Host, root: string, { id, from, to, reason }: Extract<Cmd, { _tag: "Write" }>): Promise<Msg> {
+  const done = (res: Res<string>, second: boolean): Msg => ({ _tag: "Written", id, to, error: res.ok ? null : res.error, second });
+  if (to === "closed") {
+    return done(await closeBead(host, root, id, reason), false);
+  }
+  if (from !== "closed") {
+    return done(await updateStatus(host, root, id, to), false);
+  }
+  const reopened = await reopenBead(host, root, id);
+  return !reopened.ok || to === "open" ? done(reopened, false) : done(await updateStatus(host, root, id, to), true);
+}
+
 // Runs a Cmd and answers with a Msg. The three list reads go at once; the first error in list, ready, blocked order wins.
 export async function run(host: Host, root: string, cmd: Cmd): Promise<Msg> {
   switch (cmd._tag) {
@@ -137,5 +156,9 @@ export async function run(host: Host, root: string, cmd: Cmd): Promise<Msg> {
     case "Wait":
       await host.sleep(WAIT_MS[cmd.timer]);
       return { _tag: "Waited", id: cmd.id, gen: cmd.gen, timer: cmd.timer };
+    case "Statuses":
+      return { _tag: "StatusesRead", res: await statuses(host, root) };
+    case "Write":
+      return write(host, root, cmd);
   }
 }

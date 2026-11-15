@@ -147,7 +147,15 @@ export const decodeComments = decoder((json) =>
   }),
 );
 
-export const decodeStatuses = decoder((json) => each(top(json), "built_in_statuses", "$", (o, p): StatusInfo => ({ name: str(o, "name", p), icon: str(o, "icon", p), category: str(o, "category", p) })));
+// Custom statuses have no icon, built-in ones always do.
+const status =
+  (icon: (o: Obj, k: string, path: string) => string) =>
+  (o: Obj, p: string): StatusInfo => ({ name: str(o, "name", p), icon: icon(o, "icon", p), category: str(o, "category", p) });
+
+export const decodeStatuses = decoder((json) => {
+  const o = top(json);
+  return [...each(o, "built_in_statuses", "$", status(str)), ...(o.custom_statuses == null ? [] : each(o, "custom_statuses", "$", status(strOr)))];
+});
 
 // The host values are not bd's: a wrong shape is "nothing focused", not an error.
 export function decodeFocus(v: unknown): Focus | null {

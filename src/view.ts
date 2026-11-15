@@ -4,14 +4,14 @@ import { div, svg, uniform_list } from "gpui-kit";
 import type { Element, FocusHandle } from "gpui-kit";
 import { h_flex, Input, Popup, Scrollbar, TextView, v_flex } from "gpui-base";
 import type { InputState, VirtualListScrollHandle } from "gpui-base";
-import { age, ALL, fullDate, hiddenByFilters, idChars, isWide, keyFor, listWidth, NO_AGE_BELOW, NOT_CLOSED, ROW_H, shownId, SORT_KEYS, statusOptions, textSections, treeRows, typeOptions } from "./rows.ts";
+import { age, ALL, fullDate, hiddenByFilters, idChars, isWide, keyFor, listWidth, NO_AGE_BELOW, NOT_CLOSED, pickOptions, ROW_H, shownBead, shownId, SORT_KEYS, statusOptions, textSections, treeRows, typeOptions } from "./rows.ts";
 import type { BdError, Bead, BeadDetail, Detail, Menu, Model, Msg, Part, PartName, TreeNode, TreeRow } from "./types.ts";
 
 export type Theme = Record<string, `#${string}`>;
 type Dispatch = (msg: Msg) => void;
-// What the view owns and the model must not hold: the focus target keys reach, the search box, the list's scroll position,
-// the id font, and `seen`, which hears the rows the list just drew so the owner can tell whether a row is on screen.
-export type Ui = { nav: FocusHandle; search: InputState; scroll: VirtualListScrollHandle; mono: string; seen: (start: number, end: number) => void };
+// What the view owns and the model must not hold: the focus target keys reach, the search box, the close reason's box, the list's
+// scroll position, the id font, and `seen`, which hears the rows the list just drew so the owner can tell whether a row is on screen.
+export type Ui = { nav: FocusHandle; search: InputState; reason: InputState; scroll: VirtualListScrollHandle; mono: string; seen: (start: number, end: number) => void };
 
 const icon = (name: string): string => `mods/beads/icons/${name}.svg`;
 
@@ -145,6 +145,26 @@ function searchBox(ui: Ui): Element {
   );
 }
 
+const panel = (t: Theme): Element => v_flex().min_w(140).py(4).rounded(8).border_1().border_color(t.border).bg(t.popover);
+
+const option = (id: string, label: string, on: boolean, t: Theme, click: () => void): Element =>
+  h_flex()
+    .id(id)
+    .h(26)
+    .px(10)
+    .gap(8)
+    .items_center()
+    .text_size(12)
+    .text_color(on ? t.accent : t.foreground)
+    .cursor_pointer()
+    .hover((s) => s.bg(t.hover))
+    .active((s) => s.bg(t.selected))
+    .on_click((_e, cx) => {
+      cx.stop_propagation();
+      click();
+    })
+    .child(label);
+
 // A picker: its button, and under it the choices in a layer above the window while its menu is the open one.
 function picker(m: Model, name: Menu, label: string, on: boolean, t: Theme, dispatch: Dispatch): Element {
   const options: { label: string; on: boolean; msg: Msg }[] =
@@ -160,37 +180,7 @@ function picker(m: Model, name: Menu, label: string, on: boolean, t: Theme, disp
   )
     .anchor("bottom_left")
     .flex_none()
-    .when(m.menu === name, (e) =>
-      e.content(
-        v_flex()
-          .min_w(140)
-          .py(4)
-          .rounded(8)
-          .border_1()
-          .border_color(t.border)
-          .bg(t.popover)
-          .children(
-            options.map((o) =>
-              h_flex()
-                .id(`option-${name}-${o.label}`)
-                .h(26)
-                .px(10)
-                .gap(8)
-                .items_center()
-                .text_size(12)
-                .text_color(o.on ? t.accent : t.foreground)
-                .cursor_pointer()
-                .hover((s) => s.bg(t.hover))
-                .active((s) => s.bg(t.selected))
-                .on_click((_e, cx) => {
-                  cx.stop_propagation();
-                  dispatch(o.msg);
-                })
-                .child(o.label),
-            ),
-          ),
-      ),
-    );
+    .when(m.menu === name, (e) => e.content(panel(t).children(options.map((o) => option(`option-${name}-${o.label}`, o.label, o.on, t, () => dispatch(o.msg))))));
 }
 
 function filters(m: Model, t: Theme, dispatch: Dispatch, narrow: boolean): Element[] {
@@ -340,6 +330,7 @@ const KEYS: [string, string][] = [
   ["Esc", "Back to the list (narrow), clear the search, close a menu"],
   ["Tab", "Switch focus between list and detail (wide)"],
   ["[ ]", "Back and forward in the history"],
+  ["s", "Change the status of the shown bead"],
   ["/", "Search"],
   ["Ctrl+R", "Refresh"],
   ["?", "Show or hide these keys"],
@@ -441,8 +432,67 @@ function tree(label: string, part: "down" | "up", p: Part<TreeNode[]>, empty: st
   return [section(`${label} (${rows.length})`, t, ...(rows.length === 0 ? [div().text_size(12).text_color(t.muted).child(empty)] : rows.map((r, i) => treeRow(r, `${part}-${i}`, t, dispatch, mono))))];
 }
 
-function metaRow(b: BeadDetail, t: Theme, ui: Ui, now: number): Element {
-  const status = statusColor(b.status, t);
+// The status pill opens the picker of the shown bead. While bd writes it the pill dims, spins and does nothing.
+function statusPill(b: BeadDetail, m: Model, t: Theme, dispatch: Dispatch, ui: Ui): Element {
+  const color = statusColor(b.status, t);
+  const busy = m.writing.has(b.id);
+  const pill = h_flex()
+    .id("status-pill")
+    .gap(3)
+    .px(6)
+    .items_center()
+    .rounded(4)
+    .border_1()
+    .border_color(color)
+    .text_size(10)
+    .font_semibold()
+    .text_color(color)
+    .opacity(busy ? 0.6 : 1)
+    .when(busy, (e) => e.child(svg(icon("refresh")).size(10).flex_none().spin(900)))
+    .child(statusLabel(b.status))
+    .when(!busy, (e) =>
+      e
+        .child(svg(icon("chevron-down")).size(10).flex_none())
+        .tooltip("Change status (s)")
+        .cursor_pointer()
+        .hover((s) => s.bg(t.hover))
+        .active((s) => s.bg(t.selected))
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          dispatch({ _tag: "ToggleMenu", menu: "pick" });
+        }),
+    );
+  // shortcut: no outside-press dismissal, as with the filter menus. The 120 ms open fade is skipped: freshly mounted Popup content has no
+  // earlier opacity for .transition to animate from. Revisit if gpui-kit gains an enter animation.
+  return Popup.new("menu-pick", pill)
+    .anchor("bottom_left")
+    .flex_none()
+    .when(!busy && m.menu === "pick", (e) => e.content(panel(t).children(pickOptions(m, b.status).map((s) => option(`option-pick-${s}`, s, s === b.status, t, () => dispatch({ _tag: "Pick", status: s }))))))
+    .when(!busy && m.menu === "reason", (e) =>
+      e.content(
+        panel(t)
+          .w(240)
+          .p(8)
+          .gap(6)
+          .child(div().text_size(11).text_color(t.muted).child("Reason for closing (optional)"))
+          // A press in the box is the box's own, as with the search box.
+          .child(
+            div()
+              .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+              .child(Input.new(ui.reason).h(26).w_full().text_size(12)),
+          )
+          .child(
+            h_flex()
+              .gap(6)
+              .justify_end()
+              .child(button("close-cancel", "Cancel", false, t, () => dispatch({ _tag: "Escape" })))
+              .child(button("close-confirm", "Close bead", true, t, () => dispatch({ _tag: "CloseWith", reason: ui.reason.value() }))),
+          ),
+      ),
+    );
+}
+
+function metaRow(b: BeadDetail, m: Model, t: Theme, dispatch: Dispatch, ui: Ui, now: number): Element {
   const ago = age(b.created_at, now);
   return h_flex()
     .flex_wrap()
@@ -451,7 +501,7 @@ function metaRow(b: BeadDetail, t: Theme, ui: Ui, now: number): Element {
     .items_center()
     .text_size(12)
     .child(div().font_family(ui.mono).text_size(12).text_color(t.muted).child(b.id))
-    .child(div().px(6).rounded(4).border_1().border_color(status).text_size(10).font_semibold().text_color(status).child(statusLabel(b.status)))
+    .child(statusPill(b, m, t, dispatch, ui))
     .child(div().text_size(11).font_semibold().text_color(priorityColor(b.priority, t)).child(`P${b.priority}`))
     .when(b.assignee !== null, (e) => e.child(div().text_color(t.muted).child(`@${b.assignee}`)))
     .child(
@@ -463,7 +513,10 @@ function metaRow(b: BeadDetail, t: Theme, ui: Ui, now: number): Element {
     );
 }
 
-function beadBody(d: BeadDetail, e: Detail, hidden: boolean, t: Theme, dispatch: Dispatch, ui: Ui, now: number): Element[] {
+// A failed status write: bd's text, and when bd reopen had worked, which step failed.
+const writeText = (w: { error: BdError; second: string | null }): string => (w.second === null ? bdText(w.error) : `bd reopen worked, but bd update --status ${w.second} failed: ${bdText(w.error)}`);
+
+function beadBody(d: BeadDetail, e: Detail, m: Model, hidden: boolean, t: Theme, dispatch: Dispatch, ui: Ui, now: number): Element[] {
   const comments = e.comments._tag === "Ready" ? e.comments.value : e.comments._tag === "Loading" ? (e.comments.prev ?? []) : [];
   const sorted = [...comments].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
   return [
@@ -480,7 +533,8 @@ function beadBody(d: BeadDetail, e: Detail, hidden: boolean, t: Theme, dispatch:
       // Two lines, then cut: gpui has no line clamp, so the box is two lines high.
       .child(div().flex_1().min_w(0).max_h(40).overflow_hidden().text_size(16).line_height(1.25).font_semibold().child(d.title)),
     ...(hidden ? [div().flex_none().text_size(12).text_color(t.muted).child("Hidden by the current filters")] : []),
-    metaRow(d, t, ui, now),
+    metaRow(d, m, t, dispatch, ui, now),
+    ...(m.writeError?.id === d.id ? [div().flex_none().text_size(12).text_color(red(t)).child(writeText(m.writeError))] : []),
     ...(d.labels.length === 0
       ? []
       : [
@@ -557,11 +611,11 @@ function detailBody(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui
             .child(button("retry-show", "Retry", false, t, () => dispatch({ _tag: "Retry", part: "show" }))),
         ];
   }
-  const bead = show._tag === "Ready" ? show.value : show.prev;
+  const bead = shownBead(m);
   if (bead === null) {
     return entry.slow ? [note("Loading")] : [];
   }
-  return beadBody(bead, entry, hiddenByFilters(m, rows), t, dispatch, ui, now);
+  return beadBody(bead, entry, m, hiddenByFilters(m, rows), t, dispatch, ui, now);
 }
 
 function detailPane(m: Model, rows: Bead[], t: Theme, dispatch: Dispatch, ui: Ui, narrow: boolean, now: number): Element {

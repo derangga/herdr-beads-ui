@@ -233,7 +233,7 @@ test("keys are commands, except in the search box where only Esc is", () => {
   assert.deepEqual(keyFor(m, "up"), { _tag: "Move", delta: -1 });
   assert.deepEqual(keyFor(m, "ctrl-r"), { _tag: "Refresh" });
   assert.deepEqual(keyFor(m, "?"), { _tag: "ToggleHelp" });
-  assert.equal(keyFor(m, "s"), null);
+  assert.equal(keyFor(m, "x"), null);
   const typing = { ...m, searching: true };
   assert.equal(keyFor(typing, "j"), null);
   assert.equal(keyFor(typing, "enter"), null);

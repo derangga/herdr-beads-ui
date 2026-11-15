@@ -196,3 +196,14 @@ test("font: the settings family, else Menlo", () => {
     assert.equal(decodeFont(bad), "Menlo");
   }
 });
+
+test("statuses: custom ones follow the built-in, without an icon", () => {
+  const all = value(
+    decodeStatuses(
+      broken("statuses", (j) => (j.custom_statuses = [{ name: "review", category: "unspecified" }])),
+      V,
+    ),
+  );
+  assert.equal(all.at(-1)?.name, "review");
+  assert.equal(all.at(-1)?.icon, "");
+});

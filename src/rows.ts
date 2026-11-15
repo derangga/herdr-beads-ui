@@ -117,13 +117,26 @@ export const listWidth = (width: number): number => Math.max(360, Math.round(wid
 
 export const SORT_KEYS: SortKey[] = ["priority", "created", "updated", "closed", "status", "id", "title", "type", "assignee"];
 
-const BUILT_IN_STATUSES = ["open", "in_progress", "blocked", "deferred", "closed"];
+export const BUILT_IN_STATUSES = ["open", "in_progress", "blocked", "deferred", "closed"];
 
 // The filter's fixed choices, then any status or type the loaded beads use that bd's built-ins do not name.
 export function statusOptions(m: Model): string[] {
   const custom = new Set((m.snapshot?.beads ?? []).map((b) => b.status).filter((s) => !BUILT_IN_STATUSES.includes(s)));
   return [NOT_CLOSED, ALL, ...BUILT_IN_STATUSES, ...[...custom].sort()];
 }
+
+// The shown bead as its detail has it; null until the first reply. The status is the list's, which a load updates before the detail
+// refetches, so a changed status does not show the old one again while the detail reloads.
+export function shownBead(m: Model): BeadDetail | null {
+  const id = shownId(m);
+  const p = id === null ? undefined : m.details.get(id)?.show;
+  const d = p?._tag === "Ready" ? p.value : p?._tag === "Loading" ? p.prev : null;
+  const status = m.snapshot?.beads.find((b) => b.id === id)?.status;
+  return d === null || status === undefined ? d : { ...d, status };
+}
+
+// The picker's choices: bd's statuses, and the bead's own when it holds one bd does not list.
+export const pickOptions = (m: Model, current: string): string[] => (m.statuses.includes(current) ? m.statuses : [...m.statuses, current]);
 
 export function typeOptions(m: Model): string[] {
   return [ALL, ...[...new Set((m.snapshot?.beads ?? []).map((b) => b.issue_type))].sort()];
@@ -183,6 +196,8 @@ export function keyFor(m: Model, keystroke: string): Msg | null {
       return { _tag: "FocusSearch" };
     case "ctrl-r":
       return { _tag: "Refresh" };
+    case "s":
+      return { _tag: "ToggleMenu", menu: "pick" };
     case "[":
       return { _tag: "Walk", delta: -1 };
     case "]":

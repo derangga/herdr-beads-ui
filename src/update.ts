@@ -1,13 +1,35 @@
 // The reducer: (Model, Msg) -> (Model, Cmd[]). Pure. Single flight: a refresh during a load is dropped.
-import { initFilters, initSort, isWide, reselect, shownId, visible } from "./rows.ts";
+import { BUILT_IN_STATUSES, initFilters, initSort, isWide, reselect, shownBead, shownId, visible } from "./rows.ts";
 import type { Cmd, Detail, Model, Msg, Part, PartName, Res, Timer } from "./types.ts";
 
-export const initModel = (): Model => ({ snapshot: null, loading: false, error: null, filters: initFilters(), sort: initSort(), selected: null, shown: null, back: [], forward: [], details: new Map(), gen: 0, width: 0, pane: "list", searching: false, menu: null, help: false });
+export const initModel = (): Model => ({
+  snapshot: null,
+  loading: false,
+  error: null,
+  filters: initFilters(),
+  sort: initSort(),
+  selected: null,
+  shown: null,
+  back: [],
+  forward: [],
+  details: new Map(),
+  gen: 0,
+  width: 0,
+  pane: "list",
+  searching: false,
+  menu: null,
+  help: false,
+  statuses: BUILT_IN_STATUSES,
+  writing: new Map(),
+  writeError: null,
+  reload: false,
+});
 
 // A load fills the list, so the viewer opens by sending Refresh. After every message the shown bead's detail is started if it is missing.
 export function update(m: Model, msg: Msg): [Model, Cmd[]] {
   const [next, cmds] = step(m, msg);
-  const [settled, more] = settle(next);
+  // A failed write's error stays until the next action: another bead on show, or a new write or picker.
+  const [settled, more] = settle(next.writeError !== null && next.writeError.id !== shownId(next) ? { ...next, writeError: null } : next);
   return [settled, more.length === 0 ? cmds : [...cmds, ...more]];
 }
 
@@ -70,12 +92,16 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
     case "Refresh":
       return m.loading ? [m, []] : [{ ...m, loading: true }, [{ _tag: "Load" }]];
     case "Loaded": {
+      if (m.reload) {
+        return [{ ...m, reload: false }, [{ _tag: "Load" }]];
+      }
       // A failed load keeps the last good list and records the error.
+      const writing = new Map([...m.writing].filter(([, s]) => s === "running"));
       if (!msg.res.ok) {
-        return [{ ...m, loading: false, error: msg.res.error }, []];
+        return [{ ...m, loading: false, error: msg.res.error, writing }, []];
       }
       // The beads may have changed, so no cached detail is kept; the shown one reloads under what it showed.
-      const next = reselect({ ...m, loading: false, error: null, snapshot: msg.res.value });
+      const next = reselect({ ...m, loading: false, error: null, snapshot: msg.res.value, writing });
       const id = shownId(next);
       if (id === null) {
         return [{ ...next, details: new Map() }, []];
@@ -134,8 +160,17 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
       return [{ ...m, searching: true, menu: null, help: false, pane: "list" }, []];
     case "SearchFocused":
       return [msg.on === m.searching ? m : { ...m, searching: msg.on }, []];
-    case "ToggleMenu":
+    case "ToggleMenu": {
+      if (msg.menu === "pick") {
+        // Only a bead the pill is drawn for, and not while bd writes it.
+        const b = shownBead(m);
+        if (b === null || m.help || m.writing.has(b.id)) {
+          return [m, []];
+        }
+        return [{ ...m, menu: m.menu === "pick" || m.menu === "reason" ? null : "pick", writeError: null }, []];
+      }
       return [{ ...m, menu: m.menu === msg.menu ? null : msg.menu }, []];
+    }
     case "ToggleHelp":
       return [{ ...m, help: !m.help, menu: null }, []];
     case "Shown":
@@ -150,6 +185,34 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
         return [patch(m, msg.id, "show", msg.gen, { slow: true }), []];
       }
       return [m, waiting(m, msg.id, "show", msg.gen) === undefined ? [] : PARTS.map((part) => fetch(msg.id, part, msg.gen))];
+    case "ReadStatuses":
+      return [m, [{ _tag: "Statuses" }]];
+    case "StatusesRead":
+      // A failed read, or one that lists nothing, leaves the built-in five.
+      return [msg.res.ok && msg.res.value.length > 0 ? { ...m, statuses: msg.res.value.map((s) => s.name) } : m, []];
+    case "Pick": {
+      const b = shownBead(m);
+      if (b === null || m.writing.has(b.id) || msg.status === b.status) {
+        return [{ ...m, menu: null }, []];
+      }
+      return msg.status === "closed" ? [{ ...m, menu: "reason" }, []] : write(m, b.id, b.status, msg.status, "");
+    }
+    case "CloseWith": {
+      const b = shownBead(m);
+      return b === null || m.writing.has(b.id) || b.status === "closed" ? [{ ...m, menu: null }, []] : write(m, b.id, b.status, "closed", msg.reason.trim());
+    }
+    case "Written": {
+      const writing = new Map(m.writing);
+      // Nothing changed in bd: the pill goes back and the error shows.
+      if (msg.error !== null && !msg.second) {
+        writing.delete(msg.id);
+        return [{ ...m, writing, writeError: { id: msg.id, error: msg.error, second: null } }, []];
+      }
+      // Done, or the bead is open and only the second step failed: either way the list and that bead's detail load again.
+      writing.set(msg.id, "reloading");
+      const writeError = msg.error === null ? m.writeError : { id: msg.id, error: msg.error, second: msg.to };
+      return m.loading ? [{ ...m, writing, writeError, reload: true }, []] : step({ ...m, writing, writeError }, { _tag: "Refresh" });
+    }
     case "Retry": {
       const id = shownId(m);
       const d = id === null ? undefined : m.details.get(id);
@@ -162,6 +225,10 @@ function step(m: Model, msg: Msg): [Model, Cmd[]] {
       return [{ ...m, gen, details: new Map(m.details).set(id, again) }, msg.part === "show" ? [fetch(id, "show", gen), wait(id, gen, "loading")] : [fetch(id, msg.part, gen)]];
     }
   }
+}
+
+function write(m: Model, id: string, from: string, to: string, reason: string): [Model, Cmd[]] {
+  return [{ ...m, menu: null, writeError: null, writing: new Map(m.writing).set(id, "running") }, [{ _tag: "Write", id, from, to, reason }]];
 }
 
 function move(m: Model, delta: number): Model {

@@ -11,7 +11,7 @@ terminal focused, ran `herdr-app do pane.split '{"direction":"right","mod":"bead
 `this.root = focused()?.cwd`. To read the value without a visible window (see the next paragraph), I staged a copy of the
 bundle that also wrote `this.root` to a file; it wrote the scratch terminal's folder (`.../scratchpad/opener-cwd`),
 not the cwd of any other terminal. `herdr-app status` listed no errors. I then re-staged the real bundle and confirmed
-`dist/main.js` and the staged `main.js` are byte-identical.
+`herdr-app/mods/beads/main.js` and the staged `main.js` are byte-identical.
 
 **Yes: `focused()` inside `init` still names the Opener terminal and its cwd.** A probe mod split the same way also
 logged the whole `focused()` value at init: `terminal: "t2g"` (the Opener), `pane` the Opener's pane, `cwd` the Opener's

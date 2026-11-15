@@ -8,15 +8,30 @@ Needs herdr-app 0.1.15 or later and `bd` on your PATH.
 
 ## Install
 
-```sh
-npm install
-bash scripts/stage.sh   # builds, copies dist/ to ~/.config/herdr-app/mods/beads, runs herdr-app check
+Ask your herdr agent:
+
+```
+Read ~/.config/herdr-app/AGENTS.md, then add this mod: https://github.com/derangga/herdr-beads-ui/tree/master/herdr-app
 ```
 
-`stage.sh` copies only the mod folder. The button and the key below are one-time edits to your own config, which the
-script never touches.
+The agent copies `mods/beads/` into `~/.config/herdr-app/mods/`, merges `keys.json` (it adds `cmd-shift-b` and asks
+before replacing a key you already use) and runs `herdr-app check`. To pin a release, put a git tag in place of
+`master` in the URL.
 
-### The Beads button
+The mod runs `bd` in the folder of the focused terminal: `bd export`, `bd ready`, `bd blocked`, `bd statuses`, and
+`bd update` when you change a status. It uses no network, and the mod itself reads no file; `bd` reads the repo's `.beads` data. `herdr-app/` holds
+the built mod. [herdr-app/RECIPE.md](herdr-app/RECIPE.md) is the brief to build it from scratch.
+
+To install from a clone instead:
+
+```sh
+npm install
+bash scripts/stage.sh   # builds, copies herdr-app/mods/beads to ~/.config/herdr-app/mods/beads, runs herdr-app check
+```
+
+`stage.sh` copies only the mod folder. The key and the button are edits to your own config, which it never touches.
+
+### The Beads button (optional)
 
 Add this block to `~/.config/herdr-app/layouts/herdr-review.json`, in the `children` of `tabs-row`, right after the
 `review-toggle` block (the Annotate button):
@@ -41,7 +56,7 @@ Add this block to `~/.config/herdr-app/layouts/herdr-review.json`, in the `child
 The `review-toggle` block needs a comma after its closing brace. The button is lit while the focused tab has a Viewer.
 A click opens a Viewer for the focused terminal's repo, and a second click closes it.
 
-### The key
+### The key (clone install only)
 
 Add this line to the `global` section of `~/.config/herdr-app/keys.json` (mind the comma on the line above it):
 
@@ -53,7 +68,7 @@ It opens a Viewer in the focused tab, as the button does when none is open.
 
 ### Check
 
-After both edits, `herdr-app status` must list no errors, and no `layout.error` or `keys.error` file may appear in
+After the edits, `herdr-app status` must list no errors, and no `layout.error` or `keys.error` file may appear in
 `~/.config/herdr-app`. If a file is invalid, herdr-app keeps the last good version and writes why to that file.
 
 ### A herdr-review layout update removes the button
@@ -84,5 +99,5 @@ Outside it: `cmd-shift-b` opens a Viewer.
 ```sh
 npm run setup-types   # copies herdr's two .d.ts files in
 npm test && npm run typecheck && npm run lint
-npm run build         # esbuild -> dist/main.js
+npm run build         # esbuild -> herdr-app/mods/beads/main.js. Commit it: CI fails when it is stale
 ```

@@ -52,7 +52,7 @@ src/
   main.ts          the View class: init, render, close, the keyboard, the search box
 test/*.test.ts  test/fake-host.ts  test/fixtures/
 scripts/build-dist.sh  scripts/stage.sh
-dist/              committed: main.js, mod.json, icons/
+herdr-app/         committed, what a user installs: RECIPE.md, preview.png, keys.json, mods/beads/{main.js,mod.json,icons/}
 ```
 
 Toolchain: Node 22 or newer for `node --test` with type stripping, `esbuild` to bundle `src/main.ts` with

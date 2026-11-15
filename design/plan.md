@@ -68,9 +68,9 @@ src/
   toggle.ts   the tab-bar button
   main.ts     the View class: init, render, close. Wires dispatch to update and runner
 test/*.test.ts, test/fixtures/*.json   (real bd output, trimmed)
-scripts/build-dist.sh   esbuild -> dist/main.js, plus mod.json and icons
-scripts/stage.sh        copies dist/ to ~/.config/herdr-app/mods/beads and runs herdr-app check
-dist/                   committed, as herdr-review does
+scripts/build-dist.sh   esbuild -> herdr-app/mods/beads/main.js, plus mod.json and icons
+scripts/stage.sh        copies herdr-app/mods/beads/ to ~/.config/herdr-app/mods/beads and runs herdr-app check
+herdr-app/               committed: RECIPE.md, preview.png, keys.json and mods/beads/ (the build). Users install from this folder
 ```
 
 The code follows Effect's A/E/R split without the Effect library (decided 2026-11-15: Schema does not load in a

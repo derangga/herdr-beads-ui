@@ -1,0 +1,5 @@
+{
+  "global": {
+    "cmd-shift-b": { "command": "pane.split", "args": { "direction": "right", "mod": "beads" } }
+  }
+}

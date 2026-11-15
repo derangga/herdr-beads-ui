@@ -9,14 +9,14 @@ data lives stay in `bd`.
 - `src/runner.ts` runs `bd`, returns a value and never throws. `src/update.ts` is the pure reducer and the one
   place that decides what each error does. `src/rows.ts` is pure: filter, sort, trees, target picking.
 - `src/host.ts` is the only file that imports `herdr`. Everything else takes a `Host`, so tests pass `fakeHost`.
-- `src/view.ts` draws and has no logic. `src/main.ts` wires it. `dist/` is committed build output.
+- `src/view.ts` draws and has no logic. `src/main.ts` wires it. `herdr-app/` is the committed folder users install from; `herdr-app/mods/beads/` is build output.
 - One mod, three copies, told apart by `props().role`: the Viewer (none), the Beads button (`toggle`), the keys
   dialog (`keys`).
 
 ## Check your work
 
 - `npm test`, `npm run lint`, `npm run typecheck` (run `npm run setup-types` once first).
-- `bash scripts/stage.sh` rebuilds `dist/`, stages the mod and runs `herdr-app check`. Rebuild `dist/` whenever
+- `bash scripts/stage.sh` rebuilds `herdr-app/mods/beads/`, stages the mod and runs `herdr-app check`. Rebuild it whenever
   `src/` changes.
 - `view.ts` has no unit test. Take a `herdr-app shot` and say in the bead's close note what you looked at.
 

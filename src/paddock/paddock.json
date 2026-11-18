@@ -35,8 +35,8 @@
   "terminal_opacity": 0,
   "background": "canvas",
   "terminal_padding": [
-    14,
-    16
+    4,
+    6
   ],
   "padding": 6,
   "gap": 6,

@@ -12,23 +12,19 @@ Herdr customisations, one folder each, with no imports between them, so one can 
 `herdr-app/` is the committed build that users and Nix copy into `~/.config/herdr-app`: `layouts/paddock.*`,
 `mods/beads/` and `mods/paddock-*/`. `scripts/build-dist.sh` writes it.
 
-## Map of beads
+## Docs
 
-- `src/beads/runner.ts` runs `bd`, returns a value and never throws. `src/beads/update.ts` is the pure reducer and the
-  one place that decides what each error does. `src/beads/rows.ts` is pure: filter, sort, trees, target picking.
-- `src/beads/host.ts` is the only file that imports `herdr`. Everything else takes a `Host`, so tests pass `fakeHost`.
-- `src/beads/view.ts` draws and has no logic. `src/beads/main.ts` wires it.
-- One mod, three copies, told apart by `props().role`: the Viewer (none), the Beads button (`toggle`), the keys
-  dialog (`keys`).
+Each project keeps its terms and design in its own folder under `docs/`. Read only the folder of the project you are
+changing.
 
-## Paddock
+- `docs/beads/`: start with `DESIGN.md`. It says when to read each file, so load the two or three the task needs and
+  not the directory. `CONTEXT.md` defines the terms, `design/graphs/` has one call graph per group of operations,
+  `design/errors.md` says where each failure is handled, `design/herdr-app-facts.md` says what herdr-app and `bd` were
+  seen to do, and `adr/` explains choices that look odd.
+- `docs/paddock/`: `CONTEXT.md` has the terms and `DESIGN.md` has the mods, the rules for editing them and how to
+  check a change.
 
-- Typed by `src/paddock/tsconfig.json` with `strictNullChecks: false`, as herdr-app types its own mods: a View sets
-  its state in `init`. Class state is `declare` fields. Shared types live in `src/paddock/types.ts`, imported with
-  `import type` only.
-- It keeps Herdr's formatting, so it is not run through oxfmt and is exempt from `curly` (see `.oxlintrc.json`).
-- A mod name or asset path in the code (`mods/paddock-chrome/…`, `openOverlay({ mod: "paddock-agents" })`) must
-  match the folder name the build gives it.
+If a doc and what you find disagree, update the doc in the same change.
 
 ## Check your work
 
@@ -39,15 +35,6 @@ Herdr customisations, one folder each, with no imports between them, so one can 
   fails when the committed `herdr-app/` differs from a fresh build.
 - Then look for `*.error` files in `~/.config/herdr-app`. `view.ts` and Paddock have no unit tests: take a
   `herdr-app shot` and say what you looked at.
-
-## Design docs (beads)
-
-Start with `DESIGN.md`. It says when to read each file, so load the two or three the task needs and not the
-directory. Before writing a function, read its graph in `design/graphs/` and `design/errors.md`. A graph's `E:`
-lines are its test list, one test per line. What herdr-app and bd were seen to do is in
-`design/herdr-app-facts.md`. `docs/adr/` explains choices that look odd. `CONTEXT.md` defines the terms.
-
-If the design and what you find disagree, update the `design/` file in the same change.
 
 ## Tracking
 

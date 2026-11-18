@@ -63,9 +63,9 @@ It needs herdr-app 0.1.15 or later, and the `bd` command on your PATH.
 
 To learn more:
 
-- [CONTEXT.md](CONTEXT.md) defines the terms.
-- [design/ui.md](design/ui.md) describes the look and the keys.
-- [DESIGN.md](DESIGN.md) describes the design.
+- [CONTEXT.md](docs/beads/CONTEXT.md) defines the terms.
+- [design/ui.md](docs/beads/design/ui.md) describes the look and the keys.
+- [DESIGN.md](docs/beads/DESIGN.md) describes the design.
 
 ### What Beads runs
 

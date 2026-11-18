@@ -1,7 +1,7 @@
 # Call graphs: copy the id, and Send to agent
 
 Part of the [design](../../DESIGN.md). Each `E:` line is one test, and each test swaps only `Host`. The
-decision is [ADR 0003](../../docs/adr/0003-send-by-clipboard-focus-and-paste.md).
+decision is [ADR 0003](../../adr/0003-send-by-clipboard-focus-and-paste.md).
 
 ## Copy the id
 

@@ -1,8 +1,8 @@
 # Design: beads
 
-A herdr-app mod named `beads`, in `src/beads/` of herdr-mods. It shows the beads of the Viewed repo in a pane split
-beside the Opener. You can filter, sort, search, read a bead, follow its dependencies, change its status, copy its
-id and send it to an agent. Terms are in [CONTEXT.md](CONTEXT.md). Decisions are in [docs/adr/](docs/adr/).
+A herdr-app mod named `beads`, in `src/beads/` of herdr-mods. Its docs are all in `docs/beads/`. It shows the beads
+of the Viewed repo in a pane split beside the Opener. You can filter, sort, search, read a bead, follow its
+dependencies, change its status, copy its id and send it to an agent. Terms are in [CONTEXT.md](CONTEXT.md). Decisions are in [adr/](adr/).
 
 The mod holds no bead logic of its own. It runs `bd`, decodes what comes back and draws it. What counts as
 ready, what a status means and where the data lives stay in `bd`, once.
@@ -32,6 +32,16 @@ One file per group of operations. An `E:` line in a graph is one test.
 
 A new operation is a graph in one of these files, its failures in `errors.md`, and its tests in `tests.md`. A
 graph that exists in only one of those places is drift.
+
+## Rules that hold across files
+
+- `runner.ts` runs `bd`, returns a value and never throws. `update.ts` is the pure reducer and the one place that
+  decides what each error does. `rows.ts` is pure: filter, sort, trees, target picking.
+- `host.ts` is the only file that imports `herdr`. Everything else takes a `Host`, so tests pass `fakeHost`.
+- `view.ts` draws and has no logic. `main.ts` wires it.
+- One mod, three copies, told apart by `props().role`: the Viewer (none), the Beads button (`toggle`), the keys dialog
+  (`keys`).
+- Nothing here imports from `src/paddock/`. Layouts refer to this mod by the name `beads`.
 
 ## Layout
 

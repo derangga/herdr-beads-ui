@@ -2,7 +2,7 @@
 
 > **Historical.** This was the plan the mod was built from. The design now lives in [DESIGN.md](../DESIGN.md) and
 > the files it indexes, and where they disagree they win. Known drift: the data load is one `bd export`, not
-> `bd list --brief` plus four `bd` calls per shown bead ([ADR 0002](../docs/adr/0002-one-bd-export-load-instead-of-a-fetch-per-bead.md)),
+> `bd list --brief` plus four `bd` calls per shown bead ([ADR 0002](../adr/0002-one-bd-export-load-instead-of-a-fetch-per-bead.md)),
 > so the "Partial detail", "Bead deleted on show" and per-section Retry failure modes no longer exist. The `Tab`
 > focus switch between list and detail is also gone.
 

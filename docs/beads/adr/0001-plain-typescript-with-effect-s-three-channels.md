@@ -5,7 +5,7 @@ status: accepted
 # Plain TypeScript that keeps Effect's three channels, and no Effect library
 
 The mod is designed with the same pass as herdr-review: the success value (`A`), the failures (`E`) and the
-requirements (`R`), drawn as a call graph before code. `design/method.md` has the map. The library that gives
+requirements (`R`), drawn as a call graph before code. `docs/beads/design/method.md` has the map. The library that gives
 those channels types, Effect, is not in the bundle.
 
 ## Considered options

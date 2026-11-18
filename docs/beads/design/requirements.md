@@ -53,7 +53,7 @@ decodeFont                     settings                      -> family, else Men
 - A bd field of the wrong type is `Undecodable` with the path (`$[3].title`), the detail, and bd's version. The
   version is asked for with a second call only after a decode fails, so the good path costs one bd call.
 - Inside the mod the types are trusted. There is no schema library. Effect's `Schema` does not load in the mod
-  runtime ([ADR 0001](../docs/adr/0001-plain-typescript-with-effect-s-three-channels.md)).
+  runtime ([ADR 0001](../adr/0001-plain-typescript-with-effect-s-three-channels.md)).
 - bd 1.3.4 exits 1 for every failure, so `classify` reads the text of **both** stdout and stderr: `--json` moves
   some errors to stdout as JSON and leaves stderr empty, and a warning can sit on stderr beside an error on
   stdout.

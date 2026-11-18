@@ -4,7 +4,7 @@ Part of the [design](../DESIGN.md).
 
 Every operation is designed with the design-thinking pass: name the shapes, draw the happy path as a call graph
 (`A`), mark where it breaks (`E`), mark what each step needs (`R`). The model is `Effect<A, E, R>`. This mod does
-not use the Effect library, for the reasons in [ADR 0001](../docs/adr/0001-plain-typescript-with-effect-s-three-channels.md).
+not use the Effect library, for the reasons in [ADR 0001](../adr/0001-plain-typescript-with-effect-s-three-channels.md).
 herdr-review has the same map onto Rust and onto its own mod.
 
 | Effect | TypeScript in this mod |

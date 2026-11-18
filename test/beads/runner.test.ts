@@ -41,7 +41,7 @@ test("NoDatabase: bd's text is kept", async () => {
   assert.deepEqual(res, { ok: false, error: { _tag: "NoDatabase", text } });
 });
 
-// The texts herdr-app 0.1.15 rejects exec with (design/herdr-app-facts.md §4).
+// The texts herdr-app 0.1.15 rejects exec with (docs/beads/design/herdr-app-facts.md §4).
 const NO_BIN = new Error("`herdr.exec`: cannot run bd: No such file or directory (os error 2)");
 const SLOW = new Error("`herdr.exec`: bd took longer than 15 s and was stopped");
 

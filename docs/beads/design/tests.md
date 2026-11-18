@@ -25,4 +25,4 @@ suite runs `bd`.
 
 The GPUI `view` has no unit test, which is why it holds no logic. It is checked with `herdr-app check` on the
 staged mod and a `herdr-app shot` of the running app. A bead that changes it says in its close note what it
-looked at. `design/shots/` holds the screenshots taken so far.
+looked at. `docs/beads/design/shots/` holds the screenshots taken so far.

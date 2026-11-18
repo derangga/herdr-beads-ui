@@ -15,7 +15,7 @@ export const FADE_MS = 1200;
 // pane.focus lands about 100 ms after run() returns; this is the poll and its limit.
 const FOCUS_POLL_MS = 50;
 const FOCUS_POLLS = 30;
-// terminal.paste reads the clipboard some time after run() returns, so the old text waits at least this long (design/herdr-app-facts.md).
+// terminal.paste reads the clipboard some time after run() returns, so the old text waits at least this long (docs/beads/design/herdr-app-facts.md).
 export const PASTE_MS = 300;
 
 const fail = (error: BdError): Res<never> => ({ ok: false, error });

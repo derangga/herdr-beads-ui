@@ -31,4 +31,4 @@ The first design loaded a brief list, then ran four `bd` calls per shown bead (`
   once, as bd does. Sibling order follows edge order and can differ from bd's, which is not reproduced.
 - The mod follows the export's shape: JSONL, an `issue` record per line, other `_type`s skipped. A change in it
   is `Undecodable` naming the line.
-- `design/plan.md` describes the first design and is superseded on this point.
+- `docs/beads/design/plan.md` describes the first design and is superseded on this point.

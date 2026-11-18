@@ -9,7 +9,7 @@ Snapshot = { beads: BeadDetail[], edges: Edge[], ready: Set<id>, locks: Map<id, 
 ```
 
 One load builds all of it. The list, every bead's detail and both dependency trees read from it, so nothing but
-a load or a write runs `bd` ([ADR 0002](../../docs/adr/0002-one-bd-export-load-instead-of-a-fetch-per-bead.md)).
+a load or a write runs `bd` ([ADR 0002](../../adr/0002-one-bd-export-load-instead-of-a-fetch-per-bead.md)).
 
 ## Load
 

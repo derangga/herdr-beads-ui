@@ -809,8 +809,8 @@ var Store = class {
 // src/toggle.ts
 import { svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-function drawToggle(on, t, click) {
-  return h_flex().size_full().pr(10).items_center().bg(t.chrome).border_b(1).border_color(t.border).child(
+function drawToggle(on, t, click, underline = true) {
+  return h_flex().size_full().pr(10).items_center().bg(t.chrome).when(underline, (el) => el.border_b(1).border_color(t.border)).child(
     h_flex().id("toggle-beads").h(26).px(8).gap(5).flex_none().items_center().rounded(6).text_size(12).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted).hover((s) => s.bg(t.hover)).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click(click).child(svg("mods/beads/icons/task.svg").size(14)).child("Beads")
   );
 }
@@ -820,6 +820,7 @@ var TOGGLE_MS = 500;
 var text2 = (x) => typeof x === "string" && x !== "" ? x : null;
 var field = (o, key) => typeof o === "object" && o !== null ? o[key] : void 0;
 var isToggle = (props2) => field(props2, "role") === "toggle";
+var hasUnderline = (props2) => field(props2, "underline") !== false;
 var isKeys = (props2) => field(props2, "role") === "keys";
 var overlayOf = (props2) => text2(field(props2, "overlay"));
 function beadsPane(panes2, focus) {
@@ -1336,7 +1337,7 @@ var BeadsView = class extends View {
   render(_cx) {
     const t = this.host.theme();
     if (this.toggle !== void 0) {
-      return drawToggle(this.toggle.pane !== null, t, () => clickToggle(this.host));
+      return drawToggle(this.toggle.pane !== null, t, () => clickToggle(this.host), hasUnderline(this.host.props()));
     }
     if (this.keys !== void 0) {
       const id = this.keys;

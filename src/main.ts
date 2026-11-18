@@ -10,7 +10,7 @@ import { pickTarget, visible } from "./rows.ts";
 import { start, takesKeyboard } from "./states.ts";
 import { Store } from "./store.ts";
 import { drawToggle } from "./toggle.ts";
-import { beadsPane, clickToggle, isKeys, isToggle, overlayOf, watchToggle } from "./toggle-state.ts";
+import { beadsPane, clickToggle, hasUnderline, isKeys, isToggle, overlayOf, watchToggle } from "./toggle-state.ts";
 import type { Model, Msg } from "./types.ts";
 import { draw, keysDialog } from "./view.ts";
 
@@ -176,7 +176,7 @@ export default class BeadsView extends View {
   render(_cx: Context): Element {
     const t = this.host.theme();
     if (this.toggle !== undefined) {
-      return drawToggle(this.toggle.pane !== null, t, () => clickToggle(this.host));
+      return drawToggle(this.toggle.pane !== null, t, () => clickToggle(this.host), hasUnderline(this.host.props()));
     }
     if (this.keys !== undefined) {
       const id = this.keys;

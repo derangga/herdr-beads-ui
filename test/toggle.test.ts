@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { TOGGLE_MS, beadsPane, clickToggle, isKeys, isToggle, overlayOf, watchToggle } from "../src/toggle-state.ts";
+import { TOGGLE_MS, beadsPane, clickToggle, hasUnderline, isKeys, isToggle, overlayOf, watchToggle } from "../src/toggle-state.ts";
 import { fakeHost } from "./fake-host.ts";
 
 const panes = [
@@ -14,6 +14,10 @@ test("only props role toggle makes the button's copy", () => {
   assert.equal(isToggle({ role: "toggle" }), true);
   assert.equal(isToggle({ root: "/r" }), false);
   assert.equal(isToggle(null), false);
+  // Only an explicit false drops the button's divider; anything else keeps it.
+  assert.equal(hasUnderline({ role: "toggle" }), true);
+  assert.equal(hasUnderline({ role: "toggle", underline: false }), false);
+  assert.equal(hasUnderline({ role: "toggle", underline: "no" }), true);
   // The keys dialog's copy, and the overlay id herdr hands it.
   assert.equal(isKeys({ role: "keys", overlay: "o1" }), true);
   assert.equal(isKeys({ role: "toggle" }), false);

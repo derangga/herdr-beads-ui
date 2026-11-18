@@ -8,8 +8,8 @@
   "preview": "layouts/paddock.svg",
   "titlebar": "none",
   "traffic_lights": [
-    24,
-    26
+    20,
+    22
   ],
   "toast": "paddock-toast",
   "theme": "catppuccin-macchiato",
@@ -38,8 +38,8 @@
     14,
     16
   ],
-  "padding": 10,
-  "gap": 10,
+  "padding": 6,
+  "gap": 6,
   "children": [
     {
       "id": "sidebar",
@@ -116,7 +116,7 @@
       "id": "work",
       "type": "column",
       "resizable": false,
-      "gap": 10,
+      "gap": 6,
       "children": [
         {
           "id": "tabs",
@@ -176,7 +176,7 @@
         {
           "id": "work-body",
           "type": "row",
-          "gap": 10,
+          "gap": 6,
           "children": [
             {
               "id": "main",
@@ -184,7 +184,7 @@
               "content": {
                 "tab": "active",
                 "pane": {
-                  "gap": 10,
+                  "gap": 6,
                   "radius": 16,
                   "background": "#24273a",
                   "lone": true,

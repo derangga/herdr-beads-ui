@@ -1,1 +1,4 @@
-{ "rules": { "curly": ["error", "all"] } }
+{
+  "rules": { "curly": ["error", "all"] },
+  "overrides": [{ "files": ["src/paddock/**"], "rules": { "curly": "off", "no-unused-expressions": "off", "no-unused-vars": "off" } }]
+}

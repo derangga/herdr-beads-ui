@@ -67,7 +67,7 @@ src/
   view.ts     draws a Model. No state
   toggle.ts   the tab-bar button
   main.ts     the View class: init, render, close. Wires dispatch to update and runner
-test/*.test.ts, test/fixtures/*.json   (real bd output, trimmed)
+test/beads/*.test.ts, test/beads/fixtures/*.json   (real bd output, trimmed)
 scripts/build-dist.sh   esbuild -> herdr-app/mods/beads/main.js, plus mod.json and icons
 scripts/stage.sh        copies herdr-app/mods/beads/ to ~/.config/herdr-app/mods/beads and runs herdr-app check
 herdr-app/               committed: RECIPE.md, preview.png, keys.json and mods/beads/ (the build). Users install from this folder

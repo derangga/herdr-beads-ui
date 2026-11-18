@@ -1,26 +1,46 @@
-# herdr-beads-ui
+# herdr-mods
 
-A herdr-app mod (TypeScript) that shows the beads of a repo in a pane beside the agent working on it. It reads and
-writes beads only through the `bd` command and holds no bead logic of its own, so what "ready" means and where the
-data lives stay in `bd`.
+Herdr customisations, one folder each, with no imports between them, so one can be split out with `git filter-repo`:
 
-## Map
+- `beads` (`src/beads/`, `test/beads/`): a herdr-app mod (TypeScript) that shows the beads of a repo in a pane beside
+  the agent working on it. It reads and writes beads only through the `bd` command and holds no bead logic of its
+  own, so what "ready" means and where the data lives stay in `bd`. Layouts refer to it by the name `beads`.
+- `paddock` (`src/paddock/`): a layout (`paddock.json`) and six mods (`paddock-<folder>`), cloned from Herdr's own
+  mods through herdr-glass. `src/paddock/NOTICE` lists what changed; keep it and each `main.ts`'s `glass:` and `nix:`
+  notes current (Apache-2.0 asks for that).
 
-- `src/runner.ts` runs `bd`, returns a value and never throws. `src/update.ts` is the pure reducer and the one
-  place that decides what each error does. `src/rows.ts` is pure: filter, sort, trees, target picking.
-- `src/host.ts` is the only file that imports `herdr`. Everything else takes a `Host`, so tests pass `fakeHost`.
-- `src/view.ts` draws and has no logic. `src/main.ts` wires it. `herdr-app/` is the committed folder users install from; `herdr-app/mods/beads/` is build output.
+`herdr-app/` is the committed build that users and Nix copy into `~/.config/herdr-app`: `layouts/paddock.*`,
+`mods/beads/` and `mods/paddock-*/`. `scripts/build-dist.sh` writes it.
+
+## Map of beads
+
+- `src/beads/runner.ts` runs `bd`, returns a value and never throws. `src/beads/update.ts` is the pure reducer and the
+  one place that decides what each error does. `src/beads/rows.ts` is pure: filter, sort, trees, target picking.
+- `src/beads/host.ts` is the only file that imports `herdr`. Everything else takes a `Host`, so tests pass `fakeHost`.
+- `src/beads/view.ts` draws and has no logic. `src/beads/main.ts` wires it.
 - One mod, three copies, told apart by `props().role`: the Viewer (none), the Beads button (`toggle`), the keys
   dialog (`keys`).
 
+## Paddock
+
+- Typed by `src/paddock/tsconfig.json` with `strictNullChecks: false`, as herdr-app types its own mods: a View sets
+  its state in `init`. Class state is `declare` fields. Shared types live in `src/paddock/types.ts`, imported with
+  `import type` only.
+- It keeps Herdr's formatting, so it is not run through oxfmt and is exempt from `curly` (see `.oxlintrc.json`).
+- A mod name or asset path in the code (`mods/paddock-chrome/…`, `openOverlay({ mod: "paddock-agents" })`) must
+  match the folder name the build gives it.
+
 ## Check your work
 
-- `npm test`, `npm run lint`, `npm run typecheck` (run `npm run setup-types` once first).
-- `bash scripts/stage.sh` rebuilds `herdr-app/mods/beads/`, stages the mod and runs `herdr-app check`. Rebuild it whenever
-  `src/` changes.
-- `view.ts` has no unit test. Take a `herdr-app shot` and say in the bead's close note what you looked at.
+- `npm test`, `npm run lint`, `npm run typecheck` (run `npm run setup-types` once first, and again after a herdr-app
+  update).
+- `bash scripts/stage.sh` rebuilds `herdr-app/`, copies it into `~/.config/herdr-app` (each mod's `main.js` last,
+  because saving it reloads the mod) and runs `herdr-app check` on every mod. Rebuild whenever `src/` changes. CI
+  fails when the committed `herdr-app/` differs from a fresh build.
+- Then look for `*.error` files in `~/.config/herdr-app`. `view.ts` and Paddock have no unit tests: take a
+  `herdr-app shot` and say what you looked at.
 
-## Design docs
+## Design docs (beads)
 
 Start with `DESIGN.md`. It says when to read each file, so load the two or three the task needs and not the
 directory. Before writing a function, read its graph in `design/graphs/` and `design/errors.md`. A graph's `E:`

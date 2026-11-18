@@ -1,6 +1,7 @@
-# herdr-beads-ui
+# herdr-mods
 
-A herdr-app mod that shows the beads of a repo, beside the terminals and agents working on it.
+Herdr customisations. The terms below belong to the beads mod, which shows the beads of a repo beside the terminals
+and agents working on it. Paddock, the layout in `src/paddock/`, uses Herdr's own terms.
 
 ## Language
 

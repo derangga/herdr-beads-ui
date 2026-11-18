@@ -1,13 +1,14 @@
 {
   "name": "herdr-beads-mod",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "bash scripts/build-dist.sh",
-    "test": "node --experimental-strip-types --test 'test/*.test.ts'",
-    "typecheck": "tsc -p .",
-    "lint": "oxlint -c .oxlintrc.json --deny-warnings src test && oxfmt --check src test '!test/fixtures/**'",
-    "format": "for pass in 1 2 3 4 5; do oxlint -c .oxlintrc.json --fix src test > /dev/null && break; done; oxfmt src test '!test/fixtures/**'",
+    "test": "node --experimental-strip-types --test 'test/*/*.test.ts'",
+    "typecheck": "tsc -p . && tsc -p src/paddock",
+    "lint": "oxlint -c .oxlintrc.json --deny-warnings src test && oxfmt --check src/beads test '!test/beads/fixtures/**'",
+    "format": "for pass in 1 2 3 4 5; do oxlint -c .oxlintrc.json --fix src/beads test > /dev/null && break; done; oxfmt src/beads test '!test/beads/fixtures/**'",
     "setup-types": "cp \"${HERDR_APP_HOME:-$HOME/.config/herdr-app}/gpui-kit.d.ts\" \"${HERDR_APP_HOME:-$HOME/.config/herdr-app}/herdr.d.ts\" ."
   },
   "devDependencies": {

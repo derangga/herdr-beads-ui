@@ -3,7 +3,7 @@
 Part of the [design](../DESIGN.md).
 
 Each `E:` line in a graph is one test, and each test swaps only what [requirements](requirements.md) lists
-under `R:`. They run with `npm test`, which is `node --experimental-strip-types --test 'test/*.test.ts'`.
+under `R:`. They run with `npm test`, which is `node --experimental-strip-types --test 'test/beads/*.test.ts'`.
 
 | Graph | Swapped | File | Tests |
 |---|---|---|---|

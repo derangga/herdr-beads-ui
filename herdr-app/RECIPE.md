@@ -1,5 +1,9 @@
 # Beads
 
+This recipe covers the beads mod: `mods/beads/`, `keys.json` and `preview.png`. The Paddock layout in this folder
+(`layouts/paddock.*`, `mods/paddock-*/`) is separate and installs by copying; see the
+[README](https://github.com/derangga/herdr-mods#paddock).
+
 A pane that lists the beads of a repo beside the terminal or agent working on it. You filter, sort and search the
 list, read a bead, follow its dependencies, change its status, and send its id to an agent. It reads and writes
 beads only through the `bd` command.

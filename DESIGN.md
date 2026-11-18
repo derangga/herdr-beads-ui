@@ -1,8 +1,8 @@
-# Design: herdr-beads-ui
+# Design: beads
 
-A herdr-app mod named `beads`. It shows the beads of the Viewed repo in a pane split beside the Opener. You can
-filter, sort, search, read a bead, follow its dependencies, change its status, copy its id and send it to an
-agent. Terms are in [CONTEXT.md](CONTEXT.md). Decisions are in [docs/adr/](docs/adr/).
+A herdr-app mod named `beads`, in `src/beads/` of herdr-mods. It shows the beads of the Viewed repo in a pane split
+beside the Opener. You can filter, sort, search, read a bead, follow its dependencies, change its status, copy its
+id and send it to an agent. Terms are in [CONTEXT.md](CONTEXT.md). Decisions are in [docs/adr/](docs/adr/).
 
 The mod holds no bead logic of its own. It runs `bd`, decodes what comes back and draws it. What counts as
 ready, what a status means and where the data lives stay in `bd`, once.
@@ -37,7 +37,7 @@ graph that exists in only one of those places is drift.
 
 ```
 package.json  tsconfig.json  .oxlintrc.json  .oxfmtrc.json
-src/
+src/beads/
   types.ts         Model, Msg, Cmd, BdError and the other shapes. No code
   decode.ts        the boundary: bd's JSON and JSONL, and the host values
   host.ts          Host: the only importer of "herdr"
@@ -50,12 +50,14 @@ src/
   toggle.ts        the button's drawing
   view.ts          GPUI drawing. No logic
   main.ts          the View class: init, render, close, the keyboard, the search box
-test/*.test.ts  test/fake-host.ts  test/fixtures/
+  icons/           the SVGs view.ts draws, copied to mods/beads/icons/
+test/beads/*.test.ts  test/beads/fake-host.ts  test/beads/fixtures/
 scripts/build-dist.sh  scripts/stage.sh
-herdr-app/         committed, what a user installs: RECIPE.md, preview.png, keys.json, mods/beads/{main.js,mod.json,icons/}
+herdr-app/         committed, what a user installs: RECIPE.md, preview.png, keys.json, mods/beads/{main.js,mod.json,icons/},
+                   and Paddock's layouts/ and mods/paddock-*/
 ```
 
-Toolchain: Node 22 or newer for `node --test` with type stripping, `esbuild` to bundle `src/main.ts` with
+Toolchain: Node 22 or newer for `node --test` with type stripping, `esbuild` to bundle `src/beads/main.ts` with
 `gpui-kit`, `gpui-base` and `herdr` left out (herdr-app provides them), `typescript` for the local typecheck,
 `oxlint` and `oxfmt`. No runtime dependency. The two declaration files `gpui-kit.d.ts` and `herdr.d.ts` are not in
 the repo. `npm run setup-types` copies them in from herdr-app, git-ignored.

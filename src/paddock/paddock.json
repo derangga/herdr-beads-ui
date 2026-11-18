@@ -1,0 +1,255 @@
+{
+  "id": "root",
+  "cloned_from": {
+    "name": "main",
+    "version": "0.1.16"
+  },
+  "type": "row",
+  "preview": "layouts/paddock.svg",
+  "titlebar": "none",
+  "traffic_lights": [
+    24,
+    26
+  ],
+  "toast": "paddock-toast",
+  "theme": "catppuccin-macchiato",
+  "colors": {
+    "canvas": "#181926",
+    "chrome": "#00000000",
+    "background": "#24273a00",
+    "surface": "#1e2030",
+    "raised": "#363a4f",
+    "hover": "#363a4f99",
+    "selected": "#363a4f",
+    "border": "#363a4f",
+    "accent": "#8aadf4",
+    "foreground": "#cad3f5",
+    "muted": "#b8c0e0",
+    "dim": "#939ab7",
+    "done": "#a6da95",
+    "working": "#eed49f",
+    "blocked": "#ed8796",
+    "popover": "#1e2030"
+  },
+  "terminal_line_height": 1.12,
+  "terminal_opacity": 0,
+  "background": "canvas",
+  "terminal_padding": [
+    14,
+    16
+  ],
+  "padding": 10,
+  "gap": 10,
+  "children": [
+    {
+      "id": "sidebar",
+      "type": "column",
+      "size": {
+        "px": 250
+      },
+      "min": 82,
+      "max": 480,
+      "background": "#1e2030",
+      "border": {
+        "width": 1,
+        "color": "border"
+      },
+      "radius": 16,
+      "shadow": "lg",
+      "resizable": false,
+      "children": [
+        {
+          "id": "brand",
+          "type": "block",
+          "size": {
+            "px": 46
+          },
+          "window_drag": true,
+          "content": {
+            "mod": "paddock-chrome"
+          }
+        },
+        {
+          "id": "sidebar-lists",
+          "type": "column",
+          "children": [
+            {
+              "id": "spaces",
+              "type": "block",
+              "size": {
+                "weight": 1
+              },
+              "min": 90,
+              "content": {
+                "mod": "paddock-spaces"
+              }
+            },
+            {
+              "id": "agents",
+              "type": "block",
+              "size": {
+                "weight": 1
+              },
+              "min": 90,
+              "content": {
+                "mod": "paddock-agents"
+              }
+            }
+          ]
+        },
+        {
+          "id": "sidebar-footer",
+          "type": "block",
+          "size": {
+            "px": 69
+          },
+          "content": {
+            "mod": "paddock-chrome",
+            "props": {
+              "footer": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "work",
+      "type": "column",
+      "resizable": false,
+      "gap": 10,
+      "children": [
+        {
+          "id": "tabs",
+          "type": "row",
+          "size": {
+            "px": 42
+          },
+          "background": "#1e2030",
+          "border": {
+            "width": 1,
+            "color": "border"
+          },
+          "radius": 16,
+          "shadow": "md",
+          "resizable": false,
+          "children": [
+            {
+              "id": "tab-strip",
+              "type": "block",
+              "window_drag": true,
+              "content": {
+                "mod": "paddock-tabs"
+              }
+            },
+            {
+              "id": "review-toggle",
+              "type": "block",
+              "size": {
+                "px": 92
+              },
+              "window_drag": true,
+              "content": {
+                "mod": "herdr-review",
+                "props": {
+                  "role": "toggle",
+                  "underline": false
+                }
+              }
+            },
+            {
+              "id": "beads-toggle",
+              "type": "block",
+              "size": {
+                "px": 84
+              },
+              "window_drag": true,
+              "content": {
+                "mod": "beads",
+                "props": {
+                  "role": "toggle",
+                  "underline": false
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "work-body",
+          "type": "row",
+          "gap": 10,
+          "children": [
+            {
+              "id": "main",
+              "type": "block",
+              "content": {
+                "tab": "active",
+                "pane": {
+                  "gap": 10,
+                  "radius": 16,
+                  "background": "#24273a",
+                  "lone": true,
+                  "border": {
+                    "width": 1,
+                    "color": "border"
+                  },
+                  "focus": {
+                    "width": 1,
+                    "color": "accent"
+                  },
+                  "header": {
+                    "content": {
+                      "mod": "paddock-pane"
+                    },
+                    "height": 30,
+                    "position": "top",
+                    "reveal": "always"
+                  }
+                }
+              }
+            },
+            {
+              "id": "panel",
+              "type": "column",
+              "hidden": true,
+              "size": {
+                "px": 340
+              },
+              "min": 280,
+              "max": 900,
+              "background": "#1e2030",
+              "border": {
+                "width": 1,
+                "color": "border"
+              },
+              "radius": 16,
+              "shadow": "lg",
+              "children": [
+                {
+                  "id": "panel-body",
+                  "type": "stack",
+                  "active": "files",
+                  "children": [
+                    {
+                      "id": "files",
+                      "type": "block",
+                      "content": {
+                        "mod": "files"
+                      }
+                    },
+                    {
+                      "id": "changes",
+                      "type": "block",
+                      "content": {
+                        "mod": "changes"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

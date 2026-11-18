@@ -1,6 +1,6 @@
 # Shapes
 
-Part of the [design](../DESIGN.md). The code is `src/types.ts`. This file says why each shape is what it is.
+Part of the [design](../DESIGN.md). The code is `src/beads/types.ts`. This file says why each shape is what it is.
 
 ```
 ids        a bead id (string, bd's own: "raccoon-46u.5")   terminal id ("t7")   pane id   tab id

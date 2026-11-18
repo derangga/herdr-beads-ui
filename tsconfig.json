@@ -26,7 +26,7 @@
     "gpui-kit.d.ts"
   ],
   "include": [
-    "src",
+    "src/beads",
     "test"
   ]
 }

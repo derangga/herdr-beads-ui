@@ -1,8 +1,8 @@
-// src/main.ts
+// src/beads/main.ts
 import { View } from "gpui-kit";
 import { InputState, VirtualListScrollHandle } from "gpui-base";
 
-// src/decode.ts
+// src/beads/decode.ts
 var Bad = class {
   path;
   detail;
@@ -159,7 +159,7 @@ function decodeFont(v) {
   return typeof family === "string" && family !== "" ? family : FALLBACK_MONO;
 }
 
-// src/host.ts
+// src/beads/host.ts
 import { agents, closeOverlay, exec, focused, nextCommand, openOverlay, panes, props, run, settings, spaces, theme } from "herdr";
 var realHost = (cx) => ({
   exec: (command, args, options) => exec(command, args, options),
@@ -180,7 +180,7 @@ var realHost = (cx) => ({
   writeClipboard: (text3) => cx.write_to_clipboard(text3)
 });
 
-// src/rows.ts
+// src/beads/rows.ts
 var NOT_CLOSED = "not closed";
 var ALL = "all";
 var initFilters = () => ({ ready: false, status: NOT_CLOSED, type: ALL, search: "" });
@@ -399,7 +399,7 @@ function keyFor(m, keystroke) {
   }
 }
 
-// src/update.ts
+// src/beads/update.ts
 var initModel = (opener = { terminal: null, tab: null }) => ({
   snapshot: null,
   loading: false,
@@ -579,7 +579,7 @@ function escape(m) {
   return m.pane === "detail" && !isWide(m) ? toList(m) : m;
 }
 
-// src/states.ts
+// src/beads/states.ts
 var takesKeyboard = (own, focusedPane, hasKeyboard, m) => own !== null && focusedPane === own && !hasKeyboard && !m.searching && m.menu === null;
 function start(host) {
   const props2 = decodeProps(host.props());
@@ -607,7 +607,7 @@ function emptyState(m, root) {
 var retryLabel = (loading) => loading ? "Retrying\u2026" : "Retry";
 var bdText = (e) => e._tag === "Undecodable" ? `bd ${e.version ?? "(version unknown)"} gave output this viewer does not understand: ${e.path} ${e.detail}` : "text" in e ? e.text : e._tag;
 
-// src/runner.ts
+// src/beads/runner.ts
 var BD_TIMEOUT_MS = 15e3;
 var RETRY_DELAYS_MS = [300, 900];
 var WAIT_LOAD_MS = 150;
@@ -769,7 +769,7 @@ async function run2(host, root, cmd) {
   }
 }
 
-// src/store.ts
+// src/beads/store.ts
 var Store = class {
   model;
   closed = false;
@@ -806,7 +806,7 @@ var Store = class {
   }
 };
 
-// src/toggle.ts
+// src/beads/toggle.ts
 import { svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
 function drawToggle(on, t, click, underline = true) {
@@ -815,7 +815,7 @@ function drawToggle(on, t, click, underline = true) {
   );
 }
 
-// src/toggle-state.ts
+// src/beads/toggle-state.ts
 var TOGGLE_MS = 500;
 var text2 = (x) => typeof x === "string" && x !== "" ? x : null;
 var field = (o, key) => typeof o === "object" && o !== null ? o[key] : void 0;
@@ -853,7 +853,7 @@ function watchToggle(cx, host, state) {
   });
 }
 
-// src/view.ts
+// src/beads/view.ts
 import { div, svg as svg2 } from "gpui-kit";
 import { h_flex as h_flex2, Input, Popover, Scrollbar, TextView, v_flex, v_virtual_list } from "gpui-base";
 var icon = (name2) => `mods/beads/icons/${name2}.svg`;
@@ -1199,7 +1199,7 @@ function list(m, rows, t, dispatch, ui, error, now, wide) {
   ).child(listColumn(m, rows, t, dispatch, ui, !wide, now));
 }
 
-// src/main.ts
+// src/beads/main.ts
 var KEYBOARD_MS = 200;
 var keysOpen = 0;
 var BeadsView = class extends View {

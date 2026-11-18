@@ -13,5 +13,6 @@ jobs:
       - run: npm run lint
       # The typecheck needs herdr's .d.ts files, which only a herdr-app install has.
       - run: npm run build
-      - name: herdr-app/mods/beads is current
-        run: git diff --exit-code -- herdr-app
+      # Untracked output counts too: a new mod's folder must be committed.
+      - name: herdr-app is current
+        run: test -z "$(git status --porcelain -- herdr-app)" || { git status --short -- herdr-app; git diff -- herdr-app; exit 1; }

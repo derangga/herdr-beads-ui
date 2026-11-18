@@ -48,3 +48,5 @@ Changes in derangga/herdr-mods (src/paddock), from derangga/nix modules/herdr-gl
   each mods/herdr-glass-<name> is mods/paddock-<name>, with every mod name and asset path
   in the code changed to match. The `glass:` and `nix:` notes at the top of each main.ts
   still say what was changed from Herdr's mod.
+- paddock-tabs: the tab strip scrolls without painting a scrollbar; a divider after the + button
+  separates the tabs from the toggles (Annotate, Beads) that follow in the row.

@@ -2,7 +2,8 @@
 // no bottom border, since the bar sits in a glass card with its own border, and the
 // sidebar's spacing: tab pills 8px from the card's edge with an 8px radius, 26px high like
 // the panel buttons. Blocks after it in its row (a mod's own panel button) get the edge.
-// nix: converted to TypeScript.
+// nix: converted to TypeScript; the tab strip scrolls without painting a scrollbar,
+// and a 1px divider after the + button separates the tabs from the toggles that follow in the row.
 import { View, div, svg, image } from "gpui-kit";
 import type { Context, Element, MouseButtonEvent, ScrollWheelEvent } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
@@ -171,10 +172,11 @@ export default class Tabs extends View {
     return h_flex().size_full().min_w(0).pr(followed(root) ? 3 : 8).pl(lightsPadding).gap(3).items_center().bg(t.chrome)
       .on_mouse_up("left", () => { this.pressed = null; })
       .on_scroll_wheel(e => this.wheel(e))
-      .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().track_scroll(this.scroll)
+      .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scroll().track_scroll(this.scroll)
         .on_size_change((_size, cx) => { if (active >= 0) { this.scroll.scroll_to_item(active); cx.notify(); } })
         .children(shown.map(item)))
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
+      .when(followed(root), el => el.child(div().w(1).h(16).mx(5).flex_none().bg(t.border)))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/paddock-tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
